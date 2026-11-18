@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#080f27">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>별똥별 피하기</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jua&display=swap">
+<style>
+/* Layout: one full-screen night-sky canvas under a thin HUD; start and result cards float centered over the field */
+:root {
+  --sky: #13224a;
+  --sky-deep: #080f27;
+  --ink: #f4efe4;
+  --mute: #a3add0;
+  --amber: #ffc45c;
+  --coral: #ff6a55;
+  --panel: rgba(13, 24, 56, 0.86);
+  --line: rgba(163, 173, 208, 0.28);
+  --display: "Jua", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --body: system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif;
+  color-scheme: dark;
+}
+[hidden] { display: none !important; }
+html { box-sizing: border-box; height: 100%; }
+body {
+  height: 100%; margin: 0; overflow: hidden;
+  background: var(--sky-deep); color: var(--ink); font-family: var(--body);
+  touch-action: none; -webkit-user-select: none; user-select: none;
+  -webkit-tap-highlight-color: transparent; overscroll-behavior: none;
+}
+#game { position: relative; width: 100%; height: 100%; overflow: hidden; }
+#cv { display: block; width: 100%; height: 100%; touch-action: none; }
+.hud {
+  position: absolute; inset: 0 0 auto;
+  display: flex; justify-content: space-between; align-items: baseline; gap: 16px;
+  padding-block: 12px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  font-family: var(--display); pointer-events: none;
+}
+.hud .score { font-size: 2.1rem; line-height: 1; font-variant-numeric: tabular-nums; }
+.hud .best { font-size: 1rem; color: var(--mute); font-variant-numeric: tabular-nums; }
+.overlay {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  padding-block: 24px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  background: rgba(8, 15, 39, 0.4);
+}
+.card {
+  width: 100%; max-width: 340px; box-sizing: border-box;
+  display: grid; gap: 16px; text-align: center;
+  padding: 28px 22px 24px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 22px;
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+}
+.card h1 {
+  margin: 0; font-family: var(--display); font-weight: 400;
+  font-size: 2.5rem; line-height: 1.1; color: var(--amber); text-wrap: balance;
+}
+.card h2 { margin: 0; font-family: var(--display); font-weight: 400; font-size: 1.4rem; color: var(--mute); }
+.card p { margin: 0; word-break: keep-all; color: var(--mute); line-height: 1.6; font-size: 0.95rem; }
+.big { font-family: var(--display); font-size: 3.6rem; line-height: 1; font-variant-numeric: tabular-nums; }
+.sub { color: var(--mute); font-variant-numeric: tabular-nums; }
+.newbest { color: var(--amber); font-family: var(--display); font-size: 1.15rem; }
+.legend { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px 18px; font-size: 0.9rem; color: var(--mute); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.dot { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+.dot.me { background: var(--amber); box-shadow: 0 0 8px var(--amber); }
+.dot.rock { background: var(--coral); }
+.dot.star { background: var(--ink); border-radius: 2px; transform: rotate(45deg); width: 9px; height: 9px; }
+button {
+  font-family: var(--display); font-size: 1.35rem;
+  padding: 14px 20px; border: 0; border-radius: 999px; cursor: pointer;
+  background: var(--amber); color: var(--sky-deep);
+}
+button:active { transform: scale(0.97); }
+button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) { button:active { transform: none; } }
+</style>
+<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);background:#080f27}</style>
+</head>
+<body>
+<div id="game">
+  <canvas id="cv" aria-label="게임 화면"></canvas>
+  <div class="hud" aria-live="off">
+    <div class="score" id="score">0</div>
+    <div class="best">최고 <span id="best">0</span></div>
+  </div>
+  <div class="overlay" id="overlay">
+    <section class="card" id="start">
+      <h1>별똥별 피하기</h1>
+      <p>화면 아무 곳이나 손가락으로 좌우로 끌어서 떨어지는 운석을 피하세요. 오래 버틸수록 빨라져요.</p>
+      <div class="legend">
+        <span><i class="dot me"></i>나</span>
+        <span><i class="dot rock"></i>운석</span>
+        <span><i class="dot star"></i>별 +50</span>
+      </div>
+      <button id="startBtn" type="button">시작하기</button>
+      <p style="font-size:.8rem">PC에서는 ← → 방향키로도 움직일 수 있어요.</p>
+    </section>
+    <section class="card" id="over" hidden>
+      <h2>운석에 맞았어요</h2>
+      <div class="big" id="final">0</div>
+      <div class="newbest" id="newbest" hidden>새 최고 기록!</div>
+      <div class="sub" id="overInfo"></div>
+      <button id="againBtn" type="button">다시 하기</button>
+    </section>
+  </div>
+</div>
+<script>
+(() => {
+  const cv = document.getElementById('cv');
+  const ctx = cv.getContext('2d');
+  const $ = (id) => document.getElementById(id);
+  const scoreEl = $('score'), bestEl = $('best');
+  const overlay = $('overlay'), startCard = $('start'), overCard = $('over');
+  const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const COLORS = { amber: '#ffc45c', coral: '#ff6a55', ink: '#f4efe4', sky: '#13224a', deep: '#080f27' };
+
+  const KEY = 'meteor-dodge-best';
+  const loadBest = () => { try { return Number(localStorage.getItem(KEY)) || 0; } catch (e) { return 0; } };
+  const saveBest = (v) => { try { localStorage.setItem(KEY, String(v)); } catch (e) {} };
+  let best = loadBest();
+  bestEl.textContent = best;
+
+  let W = 0, H = 0, unit = 1;
+  let state = 'ready'; // ready | play | dying | over
+  let t = 0, bonus = 0, score = 0, spawnT = 0, starT = 3, dyingT = 0, starsGot = 0;
+  let rocks = [], stars = [], sparks = [], sky = [];
+  const player = { x: 0, y: 0, r: 14 };
+
+  const rand = (a, b) => a + Math.random() * (b - a);
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+  function resize() {
+    const rect = cv.getBoundingClientRect();
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = rect.width; H = rect.height;
+    cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    unit = clamp(Math.min(W, H * 0.6) / 400, 0.8, 1.6);
+    player.r = 14 * unit;
+    player.y = H - Math.max(80, H * 0.14);
+    player.x = player.x ? clamp(player.x, player.r, W - player.r) : W / 2;
+    sky = Array.from({ length: Math.round(W * H / 5000) }, () => ({
+      x: Math.random() * W, y: Math.random() * H, s: rand(0.4, 1.6), v: rand(6, 22)
+    }));
+  }
+
+  function reset() {
+    t = 0; bonus = 0; score = 0; spawnT = 0.6; starT = rand(2.5, 4); starsGot = 0;
+    rocks = []; stars = []; sparks = [];
+    player.x = W / 2;
+  }
+
+  function start() {
+    reset();
+    state = 'play';
+    overlay.hidden = true;
+    scoreEl.textContent = '0';
+  }
+
+  function die() {
+    state = 'dying'; dyingT = 0.8;
+    for (let i = 0; i < 36; i++) {
+      const a = rand(0, Math.PI * 2), sp = rand(60, 320) * unit;
+      sparks.push({ x: player.x, y: player.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: rand(0.5, 1), max: 1,
+        c: Math.random() < 0.6 ? COLORS.amber : COLORS.coral });
+    }
+    try { navigator.vibrate && navigator.vibrate(150); } catch (e) {}
+  }
+
+  function showOver() {
+    state = 'over';
+    const isNew = score > best;
+    if (isNew) { best = score; saveBest(best); bestEl.textContent = best; }
+    $('final').textContent = score;
+    $('newbest').hidden = !isNew;
+    $('overInfo').textContent = `버틴 시간 ${t.toFixed(1)}초 · 모은 별 ${starsGot}개 · 최고 ${best}`;
+    startCard.hidden = true; overCard.hidden = false; overlay.hidden = false;
+    $('againBtn').focus({ preventScroll: true });
+  }
+
+  // ---------- input ----------
+  let dragId = null, lastX = 0;
+  const keys = { left: false, right: false };
+  cv.addEventListener('pointerdown', (e) => {
+    if (state !== 'play') return;
+    dragId = e.pointerId; lastX = e.clientX;
+    try { cv.setPointerCapture(e.pointerId); } catch (err) {}
+  });
+  cv.addEventListener('pointermove', (e) => {
+    if (e.pointerId !== dragId || state !== 'play') return;
+    player.x = clamp(player.x + (e.clientX - lastX) * 1.25, player.r, W - player.r);
+    lastX = e.clientX;
+  });
+  const endDrag = (e) => { if (e.pointerId === dragId) dragId = null; };
+  cv.addEventListener('pointerup', endDrag);
+  cv.addEventListener('pointercancel', endDrag);
+  addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowLeft' || e.key === 'a') keys.left = true;
+    if (e.key === 'ArrowRight' || e.key === 'd') keys.right = true;
+  });
+  addEventListener('keyup', (e) => {
+    if (e.key === 'ArrowLeft' || e.key === 'a') keys.left = false;
+    if (e.key === 'ArrowRight' || e.key === 'd') keys.right = false;
+  });
+  $('startBtn').addEventListener('click', start);
+  $('againBtn').addEventListener('click', start);
+  addEventListener('resize', resize);
+  document.addEventListener('gesturestart', (e) => e.preventDefault());
+
+  // ---------- update ----------
+  function spawnRock() {
+    const r = rand(9, 22) * unit;
+    const speed = Math.min(170 + t * 7, 560) * rand(0.8, 1.25) * unit;
+    rocks.push({ x: rand(r, W - r), y: -r - 10, r, vx: rand(-25, 25) * unit, vy: speed, spin: rand(0, 6) });
+  }
+
+  function update(dt) {
+    for (const s of sky) { s.y += s.v * dt; if (s.y > H) { s.y = -2; s.x = Math.random() * W; } }
+
+    if (state === 'play') {
+      t += dt;
+      if (keys.left) player.x -= 420 * unit * dt;
+      if (keys.right) player.x += 420 * unit * dt;
+      player.x = clamp(player.x, player.r, W - player.r);
+
+      spawnT -= dt;
+      if (spawnT <= 0) {
+        spawnRock();
+        if (t > 25 && Math.random() < 0.35) spawnRock();
+        spawnT = Math.max(0.16, 0.7 - t * 0.012) * (W > 600 ? 0.75 : 1);
+      }
+      starT -= dt;
+      if (starT <= 0) {
+        stars.push({ x: rand(20, W - 20), y: -20, r: 11 * unit, vy: 150 * unit, a: 0 });
+        starT = rand(3, 5.5);
+      }
+    }
+
+    for (const m of rocks) { m.x += m.vx * dt; m.y += m.vy * dt; m.spin += dt * 2; }
+    rocks = rocks.filter((m) => m.y - m.r < H + 40);
+    for (const s of stars) { s.y += s.vy * dt; s.a += dt * 3; }
+    stars = stars.filter((s) => s.y - s.r < H + 40);
+
+    if (state === 'play') {
+      for (const m of rocks) {
+        const d = Math.hypot(m.x - player.x, m.y - player.y);
+        if (d < (m.r + player.r) * 0.78) { die(); break; }
+      }
+      for (const s of stars) {
+        if (!s.got && Math.hypot(s.x - player.x, s.y - player.y) < s.r + player.r) {
+          s.got = true; bonus += 50; starsGot++;
+          for (let i = 0; i < 12; i++) {
+            const a = rand(0, Math.PI * 2), sp = rand(40, 160) * unit;
+            sparks.push({ x: s.x, y: s.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 0.5, max: 0.5, c: COLORS.ink });
+          }
+          try { navigator.vibrate && navigator.vibrate(20); } catch (e) {}
+        }
+      }
+      stars = stars.filter((s) => !s.got);
+      score = Math.floor(t * 10) + bonus;
+      scoreEl.textContent = score;
+    }
+
+    for (const p of sparks) { p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.96; p.vy *= 0.96; p.life -= dt; }
+    sparks = sparks.filter((p) => p.life > 0);
+
+    if (state === 'dying') { dyingT -= dt; if (dyingT <= 0) showOver(); }
+  }
+
+  // ---------- draw ----------
+  function drawStarShape(x, y, r, rot) {
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const rr = i % 2 ? r * 0.45 : r;
+      const a = rot + i * Math.PI / 5 - Math.PI / 2;
+      ctx.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr);
+    }
+    ctx.closePath();
+  }
+
+  function draw() {
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, COLORS.deep); g.addColorStop(1, COLORS.sky);
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+
+    ctx.fillStyle = 'rgba(244,239,228,0.55)';
+    for (const s of sky) ctx.fillRect(s.x, s.y, s.s, s.s);
+
+    // stars to collect
+    for (const s of stars) {
+      const pulse = reduceMotion ? 1 : 1 + Math.sin(s.a * 2) * 0.12;
+      ctx.save();
+      ctx.shadowColor = COLORS.ink; ctx.shadowBlur = 14;
+      ctx.fillStyle = COLORS.ink;
+      drawStarShape(s.x, s.y, s.r * pulse, s.a * 0.4);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // meteors with tails
+    for (const m of rocks) {
+      const len = m.r * 4.5;
+      const nx = -m.vx / Math.hypot(m.vx, m.vy), ny = -m.vy / Math.hypot(m.vx, m.vy);
+      const tail = ctx.createLinearGradient(m.x, m.y, m.x + nx * len, m.y + ny * len);
+      tail.addColorStop(0, 'rgba(255,106,85,0.55)');
+      tail.addColorStop(1, 'rgba(255,106,85,0)');
+      ctx.strokeStyle = tail; ctx.lineWidth = m.r * 1.5; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(m.x, m.y); ctx.lineTo(m.x + nx * len, m.y + ny * len); ctx.stroke();
+      ctx.fillStyle = COLORS.coral;
+      ctx.beginPath(); ctx.arc(m.x, m.y, m.r, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = 'rgba(8,15,39,0.28)';
+      ctx.beginPath(); ctx.arc(m.x + Math.cos(m.spin) * m.r * 0.35, m.y + Math.sin(m.spin) * m.r * 0.35, m.r * 0.28, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // player
+    if (state === 'play' || state === 'ready') {
+      ctx.save();
+      ctx.shadowColor = COLORS.amber; ctx.shadowBlur = 22;
+      ctx.fillStyle = COLORS.amber;
+      ctx.beginPath(); ctx.arc(player.x, player.y, player.r, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+      ctx.fillStyle = COLORS.deep;
+      const ex = player.r * 0.32, ey = player.r * 0.15, er = player.r * 0.13;
+      ctx.beginPath(); ctx.arc(player.x - ex, player.y - ey, er, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(player.x + ex, player.y - ey, er, 0, Math.PI * 2); ctx.fill();
+    }
+
+    for (const p of sparks) {
+      ctx.globalAlpha = clamp(p.life / p.max, 0, 1);
+      ctx.fillStyle = p.c;
+      ctx.beginPath(); ctx.arc(p.x, p.y, 2.6 * unit, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min((now - last) / 1000, 0.05);
+    last = now;
+    update(dt);
+    draw();
+    requestAnimationFrame(frame);
+  }
+
+  resize();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
