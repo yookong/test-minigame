@@ -15,13 +15,23 @@
 
 ## 랭킹
 
-Supabase에 점수를 모읍니다. 처음 한 번 `supabase/schema.sql`을 Supabase SQL Editor에서 실행해야 합니다.
+Supabase에 점수를 모읍니다. 게임이 보내는 점수는 믿지 않고, **서버가 그 판을 다시 돌려서** 점수를 직접 계산합니다.
 
-- 첫 판이 끝나면 닉네임을 정해 등록하고, 이후에는 판이 끝날 때마다 자동으로 올라갑니다.
-- 랭킹 화면: TOP 10(캐릭터 모습·칭호·점수·버틴 시간)과 내 순위, 닉네임 변경.
-- 점수는 서버 함수가 검사한 뒤에만 기록됩니다(서버가 잰 시간, 점수 상한, 별·폭풍 개수 확인, 한 판 한 번 제출).
-- 이상한 기록은 Table Editor → `scores`에서 `hidden`을 체크하면 랭킹에서 빠집니다.
-- Claude 링크(artifact)에서는 외부 서버 연결이 막혀 랭킹이 동작하지 않습니다.
+1. 판을 시작하면 서버가 운석 배치용 시드를 정해 줍니다(`start_run`).
+2. 게임은 1/60초마다 캐릭터의 좌우 위치만 기록하고, 5초마다·일시정지·재개·종료 때 서버에 신호를 보냅니다(`heartbeat`).
+3. 판이 끝나면 위치 기록을 Edge Function `verify-run`에 보냅니다. 서버는 같은 시뮬레이션 코드(`src/sim.js`)로 그 판을 재생해 점수·시간·별·폭풍 횟수를 계산하고, 신호 기록으로 슬로모션이나 일시정지 중 진행이 없었는지 확인한 뒤 기록합니다.
+
+설치: `supabase/schema.sql`을 SQL Editor에서 실행하고, `supabase/functions/verify-run/index.ts`를 Edge Function `verify-run`으로 배포합니다(JWT 검증 끔).
+관리: 이상한 기록은 Table Editor → `scores`에서 `hidden`을 체크하면 랭킹에서 빠집니다.
+Claude 링크(artifact)에서는 외부 서버 연결이 막혀 랭킹이 동작하지 않습니다.
+
+## 개발
+
+`index.html`과 `supabase/functions/verify-run/index.ts`는 생성 파일입니다. `src/`를 고친 뒤 빌드하세요.
+
+```bash
+python3 tools/build.py
+```
 
 ## 휴대폰에서 플레이하기
 

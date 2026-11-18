@@ -294,12 +294,188 @@ button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
   </div>
 </div>
 <script>
+// Deterministic game simulation, shared by the game page and the verify-run server function.
+// The world is 400 units wide and `worldH` units tall and advances in fixed 1/60 s ticks.
+// Only + - * /, Math.floor/min/max/abs and Math.imul are used here, so every JS engine
+// (phone browsers and the server) produces bit-identical results for the same seed and inputs.
+function createSim(seed, worldH) {
+  const W = 400, H = worldH, DT = 1 / 60, MAX_STEP = 24;
+  let s = seed >>> 0;
+  const rng = () => {
+    s = (s + 0x6d2b79f5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const rand = (a, b) => a + rng() * (b - a);
+  const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+
+  const ROCKS = {
+    normal: { colors: ['#ff6a55', '#ff9a3c', '#ff5c8a'], size: [12, 20], speed: 1 },
+    small: { colors: ['#4fd8ff'], size: [7, 10], speed: 1.45 },
+    big: { colors: ['#9b7bff'], size: [26, 34], speed: 0.68 },
+    zigzag: { colors: ['#7be06a'], size: [12, 16], speed: 0.95 },
+  };
+  const BOSS_COLOR = '#ff3d5e';
+
+  const sim = {
+    W, H, tick: 0, t: 0, score: 0, bonus: 0, level: 1, starCount: 0, storms: 0, dead: false,
+    rocks: [], pickups: [], boss: null,
+    player: { x: W / 2, y: H - Math.max(80, H * 0.14), r: 14 },
+  };
+  const P = sim.player;
+  let spawnT = 0.6, starT = rand(2.5, 4), nextId = 1;
+
+  function pickRockType(t) {
+    const w = [
+      ['normal', 6],
+      ['small', t > 8 ? 2 + t / 20 : 0],
+      ['big', t > 15 ? 1.5 + t / 40 : 0],
+      ['zigzag', t > 30 ? 1.5 + t / 30 : 0],
+    ];
+    let total = 0;
+    for (const [, v] of w) total += v;
+    let roll = rng() * total;
+    for (const [k, v] of w) { roll -= v; if (roll <= 0) return k; }
+    return 'normal';
+  }
+
+  function spawnRock(t) {
+    const type = pickRockType(t), def = ROCKS[type];
+    const r = rand(def.size[0], def.size[1]);
+    const base = Math.min(170 + t * 6 + t * t * 0.02, 950);
+    const vy = base * def.speed * rand(0.85, 1.2);
+    const slanted = t > 45 && type !== 'zigzag' && rng() < 0.3;
+    const vx = slanted ? rand(-90, 90) : rand(-20, 20);
+    const x = rand(r, W - r);
+    const color = def.colors[Math.floor(rng() * def.colors.length)];
+    const phase = rng();
+    const amp = type === 'zigzag' ? rand(60, 110) : 0;
+    sim.rocks.push({ id: nextId++, type, x, y: -r - 10, r, vx, vy, color, phase, amp });
+  }
+
+  function startBoss(ev) {
+    sim.boss = { phase: 'warn', t: 2.2, rows: 0, total: 4 + Math.floor(sim.level / 10), gap: W / 2 };
+    ev.push({ type: 'bossWarn' });
+  }
+  function bossSpeed() { return 240 + sim.level * 8; }
+  function spawnRow() {
+    const b = sim.boss, gw = Math.max(P.r * 5.4, 84);
+    b.gap = clamp(b.gap + rand(-1, 1) * W * 0.3, gw / 2 + 6, W - gw / 2 - 6);
+    const r = 13, gapStep = r * 2.3, vy = bossSpeed();
+    for (let x = r; x < W; x += gapStep) {
+      if (Math.abs(x - b.gap) < gw / 2 + r * 0.6) continue;
+      sim.rocks.push({ id: nextId++, type: 'boss', x, y: -r - 10, r, vx: 0, vy, color: BOSS_COLOR, phase: 0, amp: 0 });
+    }
+  }
+  function updateBoss(ev) {
+    const b = sim.boss;
+    b.t -= DT;
+    if (b.t > 0) return;
+    if (b.phase === 'warn') { b.phase = 'rows'; b.t = 0; return; }
+    if (b.phase === 'rows') {
+      if (b.rows < b.total) { spawnRow(); b.rows++; b.t = 1; }
+      else { b.phase = 'tail'; b.t = (H + 60) / bossSpeed(); }
+      return;
+    }
+    sim.storms++;
+    sim.bonus += 200;
+    sim.boss = null;
+    spawnT = 0.8;
+    ev.push({ type: 'bossClear' });
+  }
+
+  // One tick. `inputHalf` is where the player wants to be, in half world units (an integer).
+  sim.step = function (inputHalf) {
+    const ev = [];
+    if (sim.dead) return ev;
+    sim.tick++;
+    const t = (sim.t = sim.tick / 60);
+
+    const target = clamp(inputHalf / 2, P.r, W - P.r);
+    P.x += clamp(target - P.x, -MAX_STEP, MAX_STEP);
+
+    const lv = 1 + Math.floor(sim.tick / 900);
+    if (lv !== sim.level) {
+      sim.level = lv;
+      if (lv % 5 === 0 && !sim.boss) startBoss(ev);
+      else ev.push({ type: 'level', level: lv });
+    }
+
+    if (sim.boss) updateBoss(ev);
+    else {
+      spawnT -= DT;
+      if (spawnT <= 0) {
+        spawnRock(t);
+        const extra = t > 20 ? Math.min(0.6, (t - 20) / 80) : 0;
+        if (rng() < extra) spawnRock(t);
+        if (t > 60 && rng() < Math.min(0.4, (t - 60) / 100)) spawnRock(t);
+        spawnT = Math.max(0.1, 0.7 / (1 + 0.0155 * t + 0.00012 * t * t));
+      }
+      starT -= DT;
+      if (starT <= 0) {
+        sim.pickups.push({ id: nextId++, x: rand(20, W - 20), y: -20, r: 11, vy: 150 + t * 1.5 });
+        starT = rand(3, 5.5);
+      }
+    }
+
+    for (const m of sim.rocks) {
+      m.y += m.vy * DT;
+      if (m.type === 'zigzag') {
+        m.phase += DT * 0.48;
+        const f = m.phase - Math.floor(m.phase);
+        m.x += (1 - 4 * Math.abs(f - 0.5)) * m.amp * 3 * DT;
+      } else m.x += m.vx * DT;
+      if (m.x < m.r || m.x > W - m.r) {
+        if (m.type !== 'boss' && m.type !== 'zigzag') m.vx = -m.vx;
+        m.x = clamp(m.x, m.r, W - m.r);
+      }
+    }
+    const before = sim.rocks.length;
+    sim.rocks = sim.rocks.filter((m) => m.y - m.r < H + 40);
+    if (before > sim.rocks.length) ev.push({ type: 'dodge', n: before - sim.rocks.length });
+    for (const p of sim.pickups) p.y += p.vy * DT;
+    sim.pickups = sim.pickups.filter((p) => p.y - p.r < H + 40);
+
+    for (const m of sim.rocks) {
+      const dx = m.x - P.x, dy = m.y - P.y, rr = (m.r + P.r) * 0.78;
+      if (dx * dx + dy * dy < rr * rr) {
+        sim.dead = true;
+        ev.push({ type: 'hit' });
+        break;
+      }
+    }
+    if (!sim.dead) {
+      sim.pickups = sim.pickups.filter((p) => {
+        const dx = p.x - P.x, dy = p.y - P.y, rr = p.r + P.r;
+        if (dx * dx + dy * dy >= rr * rr) return true;
+        sim.starCount++;
+        sim.bonus += 50;
+        ev.push({ type: 'star', x: p.x, y: p.y });
+        return false;
+      });
+    }
+    sim.score = Math.floor(sim.tick / 6) + sim.bonus;
+    return ev;
+  };
+
+  // Visual-only drift after the player is hit (never used for scoring).
+  sim.coast = function (dt) {
+    for (const m of sim.rocks) { m.y += m.vy * dt; m.x += m.vx * dt; }
+    for (const p of sim.pickups) p.y += p.vy * dt;
+  };
+
+  return sim;
+}
+
 (() => {
   const cv = document.getElementById('cv');
   const ctx = cv.getContext('2d');
   const $ = (id) => document.getElementById(id);
   const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const C = { amber: '#ffc45c', coral: '#ff6a55', ink: '#f4efe4', deep: '#080f27', boss: '#ff3d5e' };
+  const DT = 1 / 60;
 
   // ================= catalog =================
   const TABS = [['skin', '색깔'], ['hat', '모자'], ['face', '표정'], ['trail', '꼬리'], ['bg', '배경']];
@@ -535,6 +711,7 @@ button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
     c.bezierCurveTo(x + s * 0.5, y, x, y, x, y + s * 0.3);
     c.closePath();
   }
+  const rrect = (c, x, y, w, h, r) => { c.beginPath(); if (c.roundRect) c.roundRect(x, y, w, h, r); else c.rect(x, y, w, h); };
 
   // ================= backgrounds =================
   const BGS = {
@@ -654,8 +831,8 @@ button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
       }
     } else if (face === 'shades') {
       c.fillStyle = '#10131f';
-      c.beginPath(); c.roundRect ? c.roundRect(x - r * 0.72, ey - r * 0.16, r * 0.6, r * 0.34, r * 0.1) : c.rect(x - r * 0.72, ey - r * 0.16, r * 0.6, r * 0.34); c.fill();
-      c.beginPath(); c.roundRect ? c.roundRect(x + r * 0.12, ey - r * 0.16, r * 0.6, r * 0.34, r * 0.1) : c.rect(x + r * 0.12, ey - r * 0.16, r * 0.6, r * 0.34); c.fill();
+      rrect(c, x - r * 0.72, ey - r * 0.16, r * 0.6, r * 0.34, r * 0.1); c.fill();
+      rrect(c, x + r * 0.12, ey - r * 0.16, r * 0.6, r * 0.34, r * 0.1); c.fill();
       c.fillRect(x - r * 0.15, ey - r * 0.08, r * 0.3, r * 0.07);
       c.fillStyle = 'rgba(255,255,255,0.55)'; c.fillRect(x - r * 0.62, ey - r * 0.1, r * 0.14, r * 0.06); c.fillRect(x + r * 0.22, ey - r * 0.1, r * 0.14, r * 0.06);
       c.strokeStyle = C.deep; c.lineWidth = Math.max(1.2, r * 0.09);
@@ -708,21 +885,6 @@ button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
   function stepTrail(list, dt) {
     for (const p of list) { p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt; }
     return list.filter((p) => p.life > 0);
-  }
-
-  // ================= meteors =================
-  const ROCKS = {
-    normal: { colors: ['#ff6a55', '#ff9a3c', '#ff5c8a'], size: [12, 20], speed: 1 },
-    small: { colors: ['#4fd8ff'], size: [7, 10], speed: 1.45 },
-    big: { colors: ['#9b7bff'], size: [26, 34], speed: 0.68 },
-    zigzag: { colors: ['#7be06a'], size: [12, 16], speed: 0.95 },
-  };
-  function pickRockType(t) {
-    const w = { normal: 6, small: t > 8 ? 2 + t / 20 : 0, big: t > 15 ? 1.5 + t / 40 : 0, zigzag: t > 30 ? 1.5 + t / 30 : 0 };
-    let total = 0; for (const k in w) total += w[k];
-    let roll = Math.random() * total;
-    for (const k in w) { roll -= w[k]; if (roll <= 0) return k; }
-    return 'normal';
   }
 
   // ================= notes (achievement toasts) =================
@@ -780,9 +942,9 @@ button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
 
   // ================= ranking (Supabase) =================
   const RANK_API = { url: 'https://tupljvsqfhvbrkkjffrx.supabase.co', key: 'sb_publishable_JfXZOw0mpDAoCPigCzR7sQ_FZY9uHfM' };
-  async function rpc(name, args) {
+  async function rpc(name, args, keepalive) {
     const res = await fetch(`${RANK_API.url}/rest/v1/rpc/${name}`, {
-      method: 'POST',
+      method: 'POST', keepalive: !!keepalive,
       headers: { apikey: RANK_API.key, 'Content-Type': 'application/json' },
       body: JSON.stringify(args),
     });
@@ -790,39 +952,69 @@ button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
     if (!res.ok) { const err = new Error((data && data.message) || 'HTTP ' + res.status); err.server = true; throw err; }
     return data;
   }
+  async function verifyRun(body) {
+    const res = await fetch(`${RANK_API.url}/functions/v1/verify-run`, {
+      method: 'POST',
+      headers: { apikey: RANK_API.key, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) { const err = new Error((data && (data.error || data.message)) || 'HTTP ' + res.status); err.server = true; throw err; }
+    return data;
+  }
+  const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
   const rankError = (e) => {
     if (!e || !e.server) return '랭킹 서버에 연결하지 못했어요. 인터넷 연결을 확인해 주세요. Claude 링크에서는 랭킹이 동작하지 않으니 GitHub Pages 주소에서 해주세요.';
-    if (/nickname/.test(e.message)) return '닉네임은 1~12자로 정해 주세요.';
-    if (/too many/.test(e.message)) return '짧은 시간에 너무 많이 시작했어요. 잠시 뒤에 다시 해주세요.';
+    const m = e.message || '';
+    if (/nickname/.test(m)) return '닉네임은 1~12자로 정해 주세요.';
+    if (/too many runs/.test(m)) return '짧은 시간에 너무 많이 시작했어요. 잠시 뒤에 다시 해주세요.';
+    if (/too slow|heartbeat|paused|missing/.test(m)) return '게임이 중간에 멈추거나 느려져서 이번 판은 랭킹에 올리지 못했어요. 인터넷이 안정적인 곳에서 다시 해보세요.';
+    if (/too many pauses/.test(m)) return '일시정지를 너무 많이 해서 이번 판은 랭킹에 올리지 못했어요.';
     return '기록을 확인하지 못해서 랭킹에 올리지 못했어요.';
   };
   const cleanNick = (s) => s.replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, 12);
 
-  let runTicket = null, pendingRun = null;
+  // net = { id, queue } while the current run is ranked, otherwise null
+  let net = null, pauseCount = 0;
+  function beat(paused) {
+    if (!net) return;
+    const n = net, args = { p_run: n.id, p_device: save.device, p_tick: sim.tick, p_paused: paused };
+    n.queue = n.queue.then(() => rpc('heartbeat', args, true).catch(() => rpc('heartbeat', args, true)).catch(() => {}));
+  }
+
+  let pendingRun = null;
   const rankBox = $('rankBox'), rankMsg = $('rankMsg'), nickForm = $('nickForm'), nickInput = $('nickInput');
 
   async function submitRun(run) {
     rankBox.hidden = false; nickForm.hidden = true;
-    rankMsg.className = 'msg'; rankMsg.textContent = '랭킹에 올리는 중…';
+    rankMsg.className = 'msg'; rankMsg.textContent = '기록을 확인하는 중…';
     try {
-      const id = await run.ticket;
-      if (!id) throw new Error('offline');
-      const res = await rpc('submit_score', {
-        p_run: id, p_device: save.device, p_nickname: save.nickname, p_score: run.score, p_time: run.time,
-        p_stars: run.natStars, p_storms: run.storms, p_title: save.title,
-        p_look: { skin: save.equip.skin, hat: save.equip.hat, face: save.equip.face },
+      if (!run.net) throw new Error('offline');
+      await run.net.queue;
+      const deltas = new Array(run.inputs.length);
+      let prev = 0;
+      for (let i = 0; i < run.inputs.length; i++) { deltas[i] = run.inputs[i] - prev; prev = run.inputs[i]; }
+      const res = await verifyRun({
+        run: run.net.id, device: save.device, nickname: save.nickname, title: save.title,
+        look: { skin: save.equip.skin, hat: save.equip.hat, face: save.equip.face }, inputs: deltas,
       });
       pendingRun = null;
-      rankMsg.textContent = run.score >= res.best ? `전체 ${res.rank}위에 올랐어요!` : `전체 ${res.rank}위 · 내 최고 ${res.best}점`;
+      rankMsg.textContent = res.score >= res.best ? `전체 ${res.rank}위에 올랐어요!` : `전체 ${res.rank}위 · 내 최고 ${res.best}점`;
     } catch (e) {
-      rankMsg.className = 'msg err'; rankMsg.textContent = rankError(e);
-      if (e && e.server && /nickname/.test(e.message)) { nickForm.hidden = false; }
+      rankMsg.className = 'msg err';
+      rankMsg.textContent = run.net ? rankError(e) : '랭킹 서버에 연결하지 못한 채로 시작해서 이번 판은 랭킹에 올라가지 않아요.';
+      if (e && e.server && /nickname/.test(e.message)) nickForm.hidden = false;
     }
   }
 
   function rankAfterRun(run) {
     pendingRun = null;
     if (run.score <= 0) { rankBox.hidden = true; return; }
+    if (!run.net) {
+      rankBox.hidden = false; nickForm.hidden = true;
+      rankMsg.className = 'msg err'; rankMsg.textContent = '랭킹 서버에 연결하지 못한 채로 시작해서 이번 판은 랭킹에 올라가지 않아요.';
+      return;
+    }
     if (save.nickname) { submitRun(run); return; }
     pendingRun = run;
     rankBox.hidden = false; nickForm.hidden = false;
@@ -892,14 +1084,23 @@ button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
   });
 
   // ================= game state =================
-  let W = 0, H = 0, unit = 1;
-  let state = 'ready'; // ready | play | paused | countdown | dying | over
-  let t = 0, bonus = 0, score = 0, spawnT = 0, starT = 3, dyingT = 0, runStars = 0, level = 1, trailT = 0;
-  let countdown = 0, boss = null, bossCleared = 0, achT = 0, natStars = 0;
+  // The simulation (src/sim.js) runs in a 400-unit-wide world; `view` maps it onto the screen.
+  let W = 0, H = 0, worldH = 680;
+  const view = { s: 1, ox: 0, oy: 0 };
+  let sim = createSim(1, worldH);
+  let state = 'ready'; // ready | starting | play | paused | countdown | dying | over
+  let acc = 0, inputs = [], desiredX = 200, runStars = 0, dyingT = 0, countdown = 0, achT = 0, trailT = 0;
   let banner = { text: '', t: 0, color: C.amber };
-  let rocks = [], stars = [], sparks = [], dots = [], trail = [];
-  const player = { x: 0, y: 0, r: 14 };
+  let sparks = [], dots = [], trail = [];
   const showBanner = (text, color = C.amber, dur = 1.6) => { banner = { text, t: dur, color }; };
+  const runInfo = () => ({ time: sim.t, score: sim.score, stars: runStars, boss: sim.storms });
+
+  const fitWorldH = () => Math.round(clamp(400 * H / Math.max(W, 1), 560, 900));
+  function updateView() {
+    view.s = Math.min(W / 400, H / worldH);
+    view.ox = (W - 400 * view.s) / 2;
+    view.oy = (H - worldH * view.s) / 2;
+  }
 
   function resize() {
     const rect = cv.getBoundingClientRect();
@@ -907,31 +1108,50 @@ button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
     W = rect.width; H = rect.height;
     cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    unit = clamp(Math.min(W, H * 0.6) / 400, 0.8, 1.6);
-    player.r = 14 * unit;
-    player.y = H - Math.max(80, H * 0.14);
-    player.x = player.x ? clamp(player.x, player.r, W - player.r) : W / 2;
+    if (state === 'ready') { worldH = fitWorldH(); sim = createSim(1, worldH); }
+    updateView();
     dots = makeDots(W, H, Math.round(W * H / 5000));
     if (!screens.shop.hidden) sizePreview();
   }
 
-  function start() {
-    t = 0; bonus = 0; score = 0; spawnT = 0.6; starT = rand(2.5, 4); runStars = 0; level = 1; achT = 0;
-    boss = null; bossCleared = 0; runAch = []; banner.t = 0; natStars = 0;
-    runTicket = rpc('start_run', { p_device: save.device }).catch(() => null);
-    rocks = []; stars = []; sparks = []; trail = [];
-    player.x = W / 2;
+  async function start() {
+    if (state === 'starting') return;
+    Sound.init();
+    state = 'starting';
+    for (const b of [$('startBtn'), $('againBtn')]) { b.disabled = true; b.dataset.label = b.dataset.label || b.textContent; b.textContent = '준비 중…'; }
+    worldH = fitWorldH(); updateView();
+    net = null; pauseCount = 0;
+    let seed = Math.floor(Math.random() * 2147483646) + 1;
+    try {
+      const r = await withTimeout(rpc('start_run', { p_device: save.device, p_h: worldH }), 3500);
+      net = { id: r.id, queue: Promise.resolve() };
+      seed = Number(r.seed);
+    } catch (e) { net = null; }
+    for (const b of [$('startBtn'), $('againBtn')]) { b.disabled = false; b.textContent = b.dataset.label; }
+    begin(seed);
+  }
+
+  function begin(seed) {
+    sim = createSim(seed, worldH);
+    inputs = []; desiredX = sim.player.x; acc = 0;
+    runStars = 0; runAch = []; achT = 0; banner.t = 0;
+    sparks = []; trail = [];
     state = 'play';
     overlay.hidden = true; pauseBtn.hidden = false;
     scoreEl.textContent = '0'; lvEl.textContent = 'Lv.1';
-    Sound.init(); Sound.music('normal');
+    Sound.music('normal');
+    if (!net) note('랭킹 서버에 연결하지 못해서 이번 판은 연습 판이에요');
   }
 
   function pause() {
     if (state !== 'play' && state !== 'countdown') return;
+    if (state === 'play') {
+      beat(true);
+      if (net && ++pauseCount > 8) { net = null; note('일시정지를 8번 넘게 해서 이번 판은 연습 판이 됐어요'); }
+    }
     state = 'paused'; pauseBtn.hidden = true; dragId = null;
     Sound.music('off');
-    $('pauseInfo').textContent = `${t.toFixed(1)}초 · Lv.${level} · ${score}점`;
+    $('pauseInfo').textContent = `${sim.t.toFixed(1)}초 · Lv.${sim.level} · ${sim.score}점`;
     persist();
     show('pause');
   }
@@ -940,38 +1160,69 @@ button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
     state = 'countdown'; countdown = 3; Sound.play('tick');
   }
 
+  function toScreen(x, y) { return [view.ox + x * view.s, view.oy + y * view.s]; }
+
+  function handle(events) {
+    for (const e of events) {
+      if (e.type === 'star') {
+        runStars++; save.stars++; save.stats.totalStars++;
+        walletEl.textContent = save.stars;
+        Sound.play('star');
+        for (let i = 0; i < 12; i++) {
+          const a = rand(0, Math.PI * 2), sp = rand(40, 160);
+          sparks.push({ x: e.x, y: e.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 0.5, max: 0.5, c: C.ink });
+        }
+        try { navigator.vibrate && navigator.vibrate(20); } catch (err) {}
+      } else if (e.type === 'dodge') {
+        save.stats.dodged += e.n;
+      } else if (e.type === 'level') {
+        showBanner(`Lv.${e.level} 속도 UP!`); Sound.play('level');
+      } else if (e.type === 'bossWarn') {
+        showBanner('운석 폭풍 경보!', C.boss, 2.2); Sound.play('warn'); Sound.music('boss');
+      } else if (e.type === 'bossClear') {
+        runStars += 3; save.stars += 3; save.stats.totalStars += 3;
+        walletEl.textContent = save.stars;
+        showBanner('폭풍 통과! +200 ★+3', C.amber, 2); Sound.play('clear'); Sound.music('normal');
+      } else if (e.type === 'hit') {
+        die();
+      }
+    }
+  }
+
   function die() {
     state = 'dying'; dyingT = 0.8; pauseBtn.hidden = true;
+    beat(true);
     Sound.music('off'); Sound.play('hit');
-    const col = skinColor(save.equip.skin, clock);
+    const col = skinColor(save.equip.skin, clock), p = sim.player;
     for (let i = 0; i < 36; i++) {
-      const a = rand(0, Math.PI * 2), sp = rand(60, 320) * unit;
-      sparks.push({ x: player.x, y: player.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: rand(0.5, 1), max: 1,
+      const a = rand(0, Math.PI * 2), sp = rand(60, 320);
+      sparks.push({ x: p.x, y: p.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: rand(0.5, 1), max: 1,
         c: Math.random() < 0.6 ? col : C.coral });
     }
     try { navigator.vibrate && navigator.vibrate(150); } catch (e) {}
   }
 
   function finishRun(quit) {
+    if (quit) beat(true);
     state = 'over'; pauseBtn.hidden = true;
     Sound.music('off');
     save.stats.runs++;
-    checkAch({ time: t, score, stars: runStars, boss: bossCleared });
-    const isNew = score > save.best;
+    checkAch(runInfo());
+    const score = sim.score, isNew = score > save.best;
     if (isNew) save.best = score;
     persist(); refreshHud();
     $('overHead').textContent = quit ? '여기까지 했어요' : '운석에 맞았어요';
     $('final').textContent = score;
     $('newbest').hidden = !isNew;
     $('gain').textContent = runStars ? `별 ${runStars}개 획득 · 보유 ★${save.stars}` : `보유 ★${save.stars}`;
-    $('overInfo').textContent = `버틴 시간 ${t.toFixed(1)}초 · Lv.${level}${bossCleared ? ` · 폭풍 ${bossCleared}번 통과` : ''} · 최고 ${save.best}`;
+    $('overInfo').textContent = `버틴 시간 ${sim.t.toFixed(1)}초 · Lv.${sim.level}${sim.storms ? ` · 폭풍 ${sim.storms}번 통과` : ''} · 최고 ${save.best}`;
     const na = $('newAch');
     na.hidden = !runAch.length;
     na.textContent = '';
     for (const a of runAch) { const d = document.createElement('div'); d.textContent = `새 업적 「${a.name}」 ★+${a.reward}`; na.appendChild(d); }
     show('over');
-    rankAfterRun({ ticket: runTicket, score, time: Math.round(t * 10) / 10, natStars, storms: bossCleared });
-    runTicket = null;
+    rankAfterRun({ net, inputs, score });
+    net = null;
     if (nickForm.hidden) $('againBtn').focus({ preventScroll: true });
   }
 
@@ -988,14 +1239,15 @@ button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
   // ================= input =================
   let dragId = null, lastX = 0;
   const keys = { left: false, right: false };
+  const steering = () => state === 'play' || state === 'countdown';
   cv.addEventListener('pointerdown', (e) => {
-    if (state !== 'play' && state !== 'countdown') return;
+    if (!steering()) return;
     dragId = e.pointerId; lastX = e.clientX;
     try { cv.setPointerCapture(e.pointerId); } catch (err) {}
   });
   cv.addEventListener('pointermove', (e) => {
-    if (e.pointerId !== dragId || (state !== 'play' && state !== 'countdown')) return;
-    player.x = clamp(player.x + (e.clientX - lastX) * 1.25, player.r, W - player.r);
+    if (e.pointerId !== dragId || !steering()) return;
+    desiredX = clamp(desiredX + (e.clientX - lastX) * 1.25 / view.s, sim.player.r, 400 - sim.player.r);
     lastX = e.clientX;
   });
   const endDrag = (e) => { if (e.pointerId === dragId) dragId = null; };
@@ -1005,7 +1257,7 @@ button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
     if (e.target && e.target.tagName === 'INPUT') return;
     if (e.key === 'ArrowLeft' || e.key === 'a') keys.left = true;
     if (e.key === 'ArrowRight' || e.key === 'd') keys.right = true;
-    if (e.key === 'p' || e.key === 'Escape') { if (state === 'play' || state === 'countdown') pause(); else if (state === 'paused') resume(); }
+    if (e.key === 'p' || e.key === 'Escape') { if (steering()) pause(); else if (state === 'paused') resume(); }
   });
   addEventListener('keyup', (e) => {
     if (e.key === 'ArrowLeft' || e.key === 'a') keys.left = false;
@@ -1025,53 +1277,7 @@ button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
   addEventListener('resize', resize);
   document.addEventListener('gesturestart', (e) => e.preventDefault());
 
-  // ================= boss wave =================
-  function startBoss() {
-    boss = { phase: 'warn', t: 2.2, rows: 0, total: 4 + Math.floor(level / 10), gap: W / 2 };
-    showBanner('운석 폭풍 경보!', C.boss, 2.2);
-    Sound.play('warn'); Sound.music('boss');
-  }
-  function spawnRow() {
-    const gw = Math.max(player.r * 5.4, 84 * unit);
-    boss.gap = clamp(boss.gap + rand(-1, 1) * W * 0.3, gw / 2 + 6, W - gw / 2 - 6);
-    const r = 13 * unit, gapStep = r * 2.3, vy = (240 + level * 8) * unit;
-    for (let x = r; x < W; x += gapStep) {
-      if (Math.abs(x - boss.gap) < gw / 2 + r * 0.6) continue;
-      rocks.push({ type: 'boss', x, y: -r - 10, r, vx: 0, vy, spin: rand(0, 6), color: C.boss, phase: 0, amp: 0 });
-    }
-  }
-  function updateBoss(dt) {
-    boss.t -= dt;
-    if (boss.t > 0) return;
-    if (boss.phase === 'warn') { boss.phase = 'rows'; boss.t = 0; return; }
-    if (boss.phase === 'rows') {
-      if (boss.rows < boss.total) { spawnRow(); boss.rows++; boss.t = 1.0; }
-      else { boss.phase = 'tail'; boss.t = (H + 60) / ((240 + level * 8) * unit); }
-      return;
-    }
-    bossCleared++;
-    bonus += 200; runStars += 3; save.stars += 3; save.stats.totalStars += 3;
-    walletEl.textContent = save.stars;
-    showBanner('폭풍 통과! +200 ★+3', C.amber, 2);
-    Sound.play('clear'); Sound.music('normal');
-    boss = null;
-    spawnT = 0.8;
-  }
-
   // ================= update =================
-  function spawnRock() {
-    const type = pickRockType(t), def = ROCKS[type];
-    const r = rand(def.size[0], def.size[1]) * unit;
-    const base = Math.min(170 + t * 6 + t * t * 0.02, 950);
-    const speed = base * def.speed * rand(0.85, 1.2) * unit;
-    const drift = t > 45 && type !== 'zigzag' && Math.random() < 0.3 ? rand(-90, 90) : rand(-20, 20);
-    rocks.push({
-      type, x: rand(r, W - r), y: -r - 10, r, vx: drift * unit, vy: speed, spin: rand(0, 6),
-      color: def.colors[Math.floor(Math.random() * def.colors.length)],
-      phase: rand(0, 6), amp: type === 'zigzag' ? rand(60, 110) * unit : 0,
-    });
-  }
-
   function update(dt) {
     clock += dt;
     if (state === 'paused') return;
@@ -1081,107 +1287,71 @@ button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
     if (state === 'countdown') {
       const before = Math.ceil(countdown);
       countdown -= dt;
-      if (countdown <= 0) { state = 'play'; Sound.play('go'); Sound.music(boss ? 'boss' : 'normal'); }
-      else if (Math.ceil(countdown) !== before) Sound.play('tick');
+      if (countdown <= 0) {
+        state = 'play'; acc = 0; beat(false);
+        Sound.play('go'); Sound.music(sim.boss ? 'boss' : 'normal');
+      } else if (Math.ceil(countdown) !== before) Sound.play('tick');
       return;
     }
 
     if (state === 'play') {
-      t += dt;
-      if (keys.left) player.x -= 420 * unit * dt;
-      if (keys.right) player.x += 420 * unit * dt;
-      player.x = clamp(player.x, player.r, W - player.r);
-
-      const lv = 1 + Math.floor(t / 15);
-      if (lv !== level) {
-        level = lv; lvEl.textContent = 'Lv.' + level;
-        if (level % 5 === 0 && !boss) startBoss();
-        else { showBanner(`Lv.${level} 속도 UP!`); Sound.play('level'); }
+      if (keys.left) desiredX -= 420 * dt;
+      if (keys.right) desiredX += 420 * dt;
+      desiredX = clamp(desiredX, sim.player.r, 400 - sim.player.r);
+      acc += dt;
+      while (acc >= DT && state === 'play') {
+        acc -= DT;
+        const input = Math.round(desiredX * 2);
+        inputs.push(input);
+        handle(sim.step(input));
+        if (state === 'play' && sim.tick % 300 === 0) beat(false);
       }
-
-      if (boss) updateBoss(dt);
-      else {
-        spawnT -= dt;
-        if (spawnT <= 0) {
-          spawnRock();
-          const extra = t > 20 ? Math.min(0.6, (t - 20) / 80) : 0;
-          if (Math.random() < extra) spawnRock();
-          if (t > 60 && Math.random() < Math.min(0.4, (t - 60) / 100)) spawnRock();
-          spawnT = Math.max(0.1, 0.7 * Math.pow(0.985, t)) * (W > 600 ? 0.75 : 1);
-        }
-        starT -= dt;
-        if (starT <= 0) {
-          stars.push({ x: rand(20, W - 20), y: -20, r: 11 * unit, vy: (150 + t * 1.5) * unit, a: 0 });
-          starT = rand(3, 5.5);
-        }
-      }
+      scoreEl.textContent = sim.score;
+      lvEl.textContent = 'Lv.' + sim.level;
       trailT -= dt;
-      if (trailT <= 0) { emitTrail(trail, save.equip.trail, player.x, player.y, player.r, unit, clock); trailT = 1 / 40; }
-    }
-
-    for (const m of rocks) {
-      m.y += m.vy * dt; m.spin += dt * 2;
-      if (m.type === 'zigzag') { m.phase += dt * 3; m.x += Math.cos(m.phase) * m.amp * dt * 3; }
-      else m.x += m.vx * dt;
-      if (m.x < m.r || m.x > W - m.r) { if (m.type !== 'boss') m.vx = -m.vx; m.x = clamp(m.x, m.r, W - m.r); }
-    }
-    const before = rocks.length;
-    rocks = rocks.filter((m) => m.y - m.r < H + 40);
-    if (state === 'play') save.stats.dodged += before - rocks.length;
-    for (const s of stars) { s.y += s.vy * dt; s.a += dt * 3; }
-    stars = stars.filter((s) => s.y - s.r < H + 40);
-
-    if (state === 'play') {
-      for (const m of rocks) {
-        if (Math.hypot(m.x - player.x, m.y - player.y) < (m.r + player.r) * 0.78) { die(); break; }
-      }
-      for (const s of stars) {
-        if (!s.got && Math.hypot(s.x - player.x, s.y - player.y) < s.r + player.r) {
-          s.got = true; bonus += 50; runStars++; natStars++; save.stars++; save.stats.totalStars++;
-          walletEl.textContent = save.stars;
-          Sound.play('star');
-          for (let i = 0; i < 12; i++) {
-            const a = rand(0, Math.PI * 2), sp = rand(40, 160) * unit;
-            sparks.push({ x: s.x, y: s.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 0.5, max: 0.5, c: C.ink });
-          }
-          try { navigator.vibrate && navigator.vibrate(20); } catch (e) {}
-        }
-      }
-      stars = stars.filter((s) => !s.got);
-      score = Math.floor(t * 10) + bonus;
-      scoreEl.textContent = score;
+      if (trailT <= 0) { emitTrail(trail, save.equip.trail, sim.player.x, sim.player.y, sim.player.r, 1, clock); trailT = 1 / 40; }
       achT -= dt;
-      if (achT <= 0 && state === 'play') { checkAch({ time: t, score, stars: runStars, boss: bossCleared }); achT = 0.5; }
+      if (achT <= 0 && state === 'play') { checkAch(runInfo()); achT = 0.5; }
+    }
+    if (state === 'dying') {
+      sim.coast(dt);
+      dyingT -= dt;
+      if (dyingT <= 0) finishRun(false);
     }
 
     trail = stepTrail(trail, dt);
     for (const p of sparks) { p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.96; p.vy *= 0.96; p.life -= dt; }
     sparks = sparks.filter((p) => p.life > 0);
-
-    if (state === 'dying') { dyingT -= dt; if (dyingT <= 0) finishRun(false); }
   }
 
   // ================= draw =================
   function draw() {
     drawBg(ctx, W, H, save.equip.bg, clock, dots);
 
-    if (boss && boss.phase === 'warn' && (reduceMotion || Math.floor(clock * 4) % 2 === 0)) {
-      const g = ctx.createLinearGradient(0, 0, 0, H * 0.3);
+    ctx.save();
+    ctx.translate(view.ox, view.oy);
+    ctx.scale(view.s, view.s);
+    const WH = sim.H;
+
+    if (sim.boss && sim.boss.phase === 'warn' && (reduceMotion || Math.floor(clock * 4) % 2 === 0)) {
+      const g = ctx.createLinearGradient(0, 0, 0, WH * 0.3);
       g.addColorStop(0, rgba(C.boss, 0.35)); g.addColorStop(1, rgba(C.boss, 0));
-      ctx.fillStyle = g; ctx.fillRect(0, 0, W, H * 0.3);
+      ctx.fillStyle = g; ctx.fillRect(0, 0, 400, WH * 0.3);
     }
 
-    for (const s of stars) {
-      const pulse = reduceMotion ? 1 : 1 + Math.sin(s.a * 2) * 0.12;
+    for (const s of sim.pickups) {
+      const a = clock * 3 + s.id;
+      const pulse = reduceMotion ? 1 : 1 + Math.sin(a * 2) * 0.12;
       ctx.save();
       ctx.shadowColor = C.ink; ctx.shadowBlur = 14; ctx.fillStyle = C.ink;
-      starPath(ctx, s.x, s.y, s.r * pulse, s.a * 0.4); ctx.fill();
+      starPath(ctx, s.x, s.y, s.r * pulse, a * 0.4); ctx.fill();
       ctx.restore();
     }
 
-    for (const m of rocks) {
-      const vx = m.type === 'zigzag' ? Math.cos(m.phase) * m.amp * 3 : m.vx;
-      const sp = Math.hypot(vx, m.vy), len = m.r * 4.5;
+    for (const m of sim.rocks) {
+      let vx = m.vx;
+      if (m.type === 'zigzag') { const f = m.phase - Math.floor(m.phase); vx = (1 - 4 * Math.abs(f - 0.5)) * m.amp * 3; }
+      const sp = Math.hypot(vx, m.vy) || 1, len = m.r * 4.5;
       const nx = -vx / sp, ny = -m.vy / sp;
       const tail = ctx.createLinearGradient(m.x, m.y, m.x + nx * len, m.y + ny * len);
       tail.addColorStop(0, rgba(m.color, 0.55)); tail.addColorStop(1, rgba(m.color, 0));
@@ -1189,32 +1359,44 @@ button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
       ctx.beginPath(); ctx.moveTo(m.x, m.y); ctx.lineTo(m.x + nx * len, m.y + ny * len); ctx.stroke();
       ctx.fillStyle = m.color;
       ctx.beginPath(); ctx.arc(m.x, m.y, m.r, 0, Math.PI * 2); ctx.fill();
+      const spin = clock * 2 + m.id;
       ctx.fillStyle = 'rgba(8,15,39,0.28)';
-      ctx.beginPath(); ctx.arc(m.x + Math.cos(m.spin) * m.r * 0.35, m.y + Math.sin(m.spin) * m.r * 0.35, m.r * 0.28, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(m.x + Math.cos(spin) * m.r * 0.35, m.y + Math.sin(spin) * m.r * 0.35, m.r * 0.28, 0, Math.PI * 2); ctx.fill();
     }
 
     drawTrail(ctx, trail);
-    if (state !== 'dying' && state !== 'over') drawHero(ctx, player.x, player.y, player.r, save.equip, clock);
+    const p = sim.player;
+    if (state !== 'dying' && state !== 'over') drawHero(ctx, p.x, p.y, p.r, save.equip, clock);
 
-    for (const p of sparks) {
-      ctx.globalAlpha = clamp(p.life / p.max, 0, 1);
-      ctx.fillStyle = p.c;
-      ctx.beginPath(); ctx.arc(p.x, p.y, 2.6 * unit, 0, Math.PI * 2); ctx.fill();
+    for (const s of sparks) {
+      ctx.globalAlpha = clamp(s.life / s.max, 0, 1);
+      ctx.fillStyle = s.c;
+      ctx.beginPath(); ctx.arc(s.x, s.y, 2.6, 0, Math.PI * 2); ctx.fill();
     }
     ctx.globalAlpha = 1;
+    ctx.restore();
+
+    // wide screens: shade the area outside the play field
+    if (view.ox > 1) {
+      ctx.fillStyle = 'rgba(4,8,20,0.55)';
+      ctx.fillRect(0, 0, view.ox, H); ctx.fillRect(W - view.ox, 0, view.ox, H);
+      ctx.strokeStyle = 'rgba(163,173,208,0.25)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(view.ox, 0); ctx.lineTo(view.ox, H); ctx.moveTo(W - view.ox, 0); ctx.lineTo(W - view.ox, H); ctx.stroke();
+    }
 
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    const fs = view.s;
     if (banner.t > 0 && (state === 'play' || state === 'countdown')) {
       ctx.globalAlpha = clamp(banner.t, 0, 1);
       ctx.fillStyle = banner.color;
-      ctx.font = `${Math.round(30 * unit)}px Jua, "Apple SD Gothic Neo", sans-serif`;
-      ctx.fillText(banner.text, W / 2, H * 0.36);
+      ctx.font = `${Math.round(30 * fs)}px Jua, "Apple SD Gothic Neo", sans-serif`;
+      ctx.fillText(banner.text, W / 2, view.oy + WH * 0.36 * view.s);
       ctx.globalAlpha = 1;
     }
     if (state === 'countdown') {
       ctx.fillStyle = C.ink;
-      ctx.font = `${Math.round(84 * unit)}px Jua, "Apple SD Gothic Neo", sans-serif`;
-      ctx.fillText(String(Math.ceil(countdown)), W / 2, H * 0.5);
+      ctx.font = `${Math.round(84 * fs)}px Jua, "Apple SD Gothic Neo", sans-serif`;
+      ctx.fillText(String(Math.ceil(countdown)), W / 2, view.oy + WH * 0.5 * view.s);
     }
   }
 
@@ -1249,7 +1431,7 @@ button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
     pTrail = stepTrail(pTrail, dt);
     stepDots(pDots, dt, pW, pH, look.bg);
     pctx.save();
-    pctx.beginPath(); pctx.roundRect ? pctx.roundRect(0, 0, pW, pH, 16) : pctx.rect(0, 0, pW, pH); pctx.clip();
+    rrect(pctx, 0, 0, pW, pH, 16); pctx.clip();
     drawBg(pctx, pW, pH, look.bg, clock, pDots);
     drawTrail(pctx, pTrail);
     drawHero(pctx, x, y, r, look, clock);
@@ -1274,7 +1456,7 @@ button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
         g.beginPath(); g.arc(23, 23, 12, 0, Math.PI * 2); g.moveTo(15, 31); g.lineTo(31, 15); g.stroke();
       }
     } else if (cat === 'bg') {
-      g.beginPath(); g.roundRect ? g.roundRect(1, 1, 44, 44, 10) : g.rect(1, 1, 44, 44); g.clip();
+      rrect(g, 1, 1, 44, 44, 10); g.clip();
       drawBg(g, 46, 46, item.id, 1.2, makeDots(46, 46, 8));
     } else {
       const look = { ...save.equip, hat: 'none', face: 'basic', [cat]: item.id };
@@ -1335,11 +1517,11 @@ button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
   // ================= loop =================
   let last = performance.now();
   function frame(now) {
-    const dt = Math.min((now - last) / 1000, 0.05);
+    const dt = Math.min((now - last) / 1000, 0.25);
     last = now;
     update(dt);
     draw();
-    drawPreview(dt);
+    drawPreview(Math.min(dt, 0.05));
     requestAnimationFrame(frame);
   }
 
@@ -1347,6 +1529,7 @@ button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
   resize();
   requestAnimationFrame(frame);
 })();
+
 </script>
 </body>
 </html>

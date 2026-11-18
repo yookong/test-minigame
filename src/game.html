@@ -1,0 +1,291 @@
+<title>별똥별 피하기</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jua&display=swap">
+<style>
+/* Layout: one full-screen sky canvas under a thin HUD; menu, result, shop, achievement and pause cards float centered over the field */
+:root {
+  --sky: #13224a;
+  --sky-deep: #080f27;
+  --ink: #f4efe4;
+  --mute: #a3add0;
+  --amber: #ffc45c;
+  --coral: #ff6a55;
+  --ok: #7be06a;
+  --panel: rgba(13, 24, 56, 0.92);
+  --tile: rgba(163, 173, 208, 0.08);
+  --line: rgba(163, 173, 208, 0.28);
+  --display: "Jua", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --body: system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif;
+  color-scheme: dark;
+}
+[hidden] { display: none !important; }
+html { box-sizing: border-box; height: 100%; }
+*, *::before, *::after { box-sizing: inherit; }
+body {
+  height: 100%; margin: 0; overflow: hidden;
+  background: var(--sky-deep); color: var(--ink); font-family: var(--body);
+  touch-action: none; -webkit-user-select: none; user-select: none;
+  -webkit-tap-highlight-color: transparent; overscroll-behavior: none;
+}
+#game { position: relative; width: 100%; height: 100%; overflow: hidden; }
+#cv { display: block; width: 100%; height: 100%; touch-action: none; }
+.hud {
+  position: absolute; inset: 0 0 auto;
+  display: grid; grid-template-columns: 1fr auto 1fr; align-items: start; gap: 12px;
+  padding-block: 12px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  font-family: var(--display); pointer-events: none;
+}
+.hud .score { font-size: 2.1rem; line-height: 1; font-variant-numeric: tabular-nums; }
+.hud .lv { font-size: 0.95rem; color: var(--mute); margin-top: 4px; }
+.hud .right { text-align: right; display: grid; gap: 4px; font-variant-numeric: tabular-nums; }
+.hud .wallet { font-size: 1.25rem; color: var(--amber); }
+.hud .best { font-size: 0.95rem; color: var(--mute); }
+#pauseBtn {
+  pointer-events: auto; width: 44px; height: 44px; padding: 0; border-radius: 50%;
+  background: rgba(244, 239, 228, 0.12); color: var(--ink); font-size: 1rem; letter-spacing: 1px;
+}
+.note {
+  position: absolute; left: 50%; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%);
+  max-width: calc(100% - 32px); padding: 8px 16px; border-radius: 999px;
+  background: var(--panel); border: 1px solid var(--amber); color: var(--amber);
+  font-family: var(--display); font-size: 1rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  pointer-events: none; z-index: 5;
+}
+.overlay {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  padding-block: 16px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  background: rgba(8, 15, 39, 0.45);
+}
+.card {
+  width: 100%; max-width: 360px; max-height: 100%; overflow-y: auto; touch-action: pan-y;
+  display: grid; gap: 12px; text-align: center;
+  padding: 24px 18px 20px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 22px;
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+}
+.card h1 {
+  margin: 0; font-family: var(--display); font-weight: 400;
+  font-size: 2.5rem; line-height: 1.1; color: var(--amber); text-wrap: balance;
+}
+.card h2 { margin: 0; font-family: var(--display); font-weight: 400; font-size: 1.4rem; color: var(--mute); }
+.card p { margin: 0; color: var(--mute); line-height: 1.6; font-size: 0.93rem; word-break: keep-all; }
+.titletag {
+  justify-self: center; padding: 3px 12px; border-radius: 999px; border: 1px solid var(--line);
+  font-family: var(--display); font-size: 0.95rem; color: var(--ink);
+}
+.big { font-family: var(--display); font-size: 3.6rem; line-height: 1; font-variant-numeric: tabular-nums; }
+.sub { color: var(--mute); font-variant-numeric: tabular-nums; word-break: keep-all; line-height: 1.5; }
+.gain { font-family: var(--display); color: var(--amber); font-size: 1.15rem; }
+.newbest { color: var(--amber); font-family: var(--display); font-size: 1.15rem; }
+.newach { display: grid; gap: 4px; font-size: 0.9rem; color: var(--ok); font-family: var(--display); }
+.legend { display: flex; justify-content: center; flex-wrap: wrap; gap: 6px 14px; font-size: 0.85rem; color: var(--mute); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.dot { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+.btns { display: grid; gap: 10px; }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+button {
+  font-family: var(--display); font-size: 1.3rem;
+  padding: 13px 20px; border: 0; border-radius: 999px; cursor: pointer;
+  background: var(--amber); color: var(--sky-deep);
+}
+button.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); font-size: 1.1rem; padding-block: 11px; }
+button.toggle { background: transparent; color: var(--mute); border: 1px solid var(--line); font-size: 0.95rem; padding: 9px 10px; }
+button.toggle[aria-pressed="true"] { color: var(--ink); border-color: var(--ink); }
+button:disabled { background: var(--tile); color: var(--mute); cursor: default; }
+button:active:not(:disabled) { transform: scale(0.97); }
+button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
+
+/* shop */
+.card-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.card-head h2 { color: var(--amber); font-size: 1.7rem; }
+.card-head .purse { font-family: var(--display); font-size: 1.25rem; color: var(--amber); font-variant-numeric: tabular-nums; }
+#preview { width: 100%; height: 104px; border-radius: 16px; background: var(--tile); display: block; }
+.tabs { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; background: var(--tile); padding: 4px; border-radius: 999px; }
+.tabs button { font-size: 0.92rem; padding: 8px 2px; background: transparent; color: var(--mute); }
+.tabs button[aria-selected="true"] { background: var(--ink); color: var(--sky-deep); }
+.items { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.item {
+  display: grid; justify-items: center; gap: 4px; padding: 10px 4px 8px;
+  border-radius: 14px; background: var(--tile); border: 2px solid transparent; color: var(--ink);
+  font-family: var(--body); font-size: 0.85rem;
+}
+.item canvas { width: 46px; height: 46px; }
+.item .nm { font-family: var(--display); font-size: 0.98rem; }
+.item .st { font-size: 0.78rem; color: var(--mute); font-variant-numeric: tabular-nums; }
+.item .st.price { color: var(--amber); }
+.item .st.on { color: var(--ink); }
+.item[aria-pressed="true"] { border-color: var(--amber); }
+.toast { min-height: 1.2em; margin-block: -4px; font-family: var(--display); color: var(--amber); }
+
+/* achievements */
+.achcount { font-family: var(--display); color: var(--mute); font-size: 1.05rem; }
+.achlist { display: grid; gap: 8px; text-align: left; }
+.ach {
+  display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 10px;
+  padding: 10px 10px 10px 12px; border-radius: 14px; background: var(--tile); border: 2px solid transparent;
+}
+.ach.done { border-color: rgba(123, 224, 106, 0.35); }
+.ach .ic { font-family: var(--display); font-size: 1.2rem; text-align: center; color: var(--mute); }
+.ach.done .ic { color: var(--ok); }
+.ach .nm { font-family: var(--display); font-size: 1.02rem; }
+.ach .ds { font-size: 0.8rem; color: var(--mute); line-height: 1.4; word-break: keep-all; }
+.ach .tt { font-size: 0.78rem; color: var(--amber); }
+.ach .side { display: grid; justify-items: end; gap: 4px; font-size: 0.8rem; color: var(--mute); font-variant-numeric: tabular-nums; }
+.ach .side button { font-size: 0.85rem; padding: 6px 10px; }
+.ach .side button.using { background: var(--ink); }
+/* ranking */
+.row3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.row3 button { padding-inline: 6px; }
+.rankbox { display: grid; gap: 8px; padding: 12px; border-radius: 16px; background: var(--tile); }
+.rankbox .msg { font-family: var(--display); font-size: 1.05rem; color: var(--ink); word-break: keep-all; }
+.rankbox .msg.err { color: var(--mute); font-family: var(--body); font-size: 0.85rem; line-height: 1.5; }
+.nickrow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.nickrow input {
+  min-width: 0; font: 16px var(--body); color: var(--ink); background: rgba(8, 15, 39, 0.6);
+  border: 1px solid var(--line); border-radius: 999px; padding: 10px 14px;
+  -webkit-user-select: text; user-select: text; touch-action: manipulation;
+}
+.nickrow input:focus-visible { outline: 2px solid var(--amber); outline-offset: 1px; }
+.nickrow button { font-size: 1rem; padding: 10px 16px; }
+.ranklist { display: grid; gap: 6px; text-align: left; }
+.rk {
+  display: grid; grid-template-columns: 30px 40px minmax(0, 1fr) auto; align-items: center; gap: 8px;
+  padding: 8px 12px 8px 8px; border-radius: 14px; background: var(--tile);
+}
+.rk.me { border: 2px solid var(--amber); }
+.rk .no { font-family: var(--display); font-size: 1.2rem; text-align: center; color: var(--mute); font-variant-numeric: tabular-nums; }
+.rk:nth-child(1) .no { color: #ffd84a; } .rk:nth-child(2) .no { color: #dfe6f5; } .rk:nth-child(3) .no { color: #e8a374; }
+.rk canvas { width: 40px; height: 40px; }
+.rk .who { min-width: 0; }
+.rk .nm { font-family: var(--display); font-size: 1.05rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rk .tt { font-size: 0.76rem; color: var(--amber); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rk .sc { font-family: var(--display); font-size: 1.15rem; font-variant-numeric: tabular-nums; text-align: right; }
+.rk .sc small { display: block; font-family: var(--body); font-size: 0.72rem; color: var(--mute); }
+.rankstate { color: var(--mute); padding: 16px 0; font-size: 0.95rem; word-break: keep-all; }
+.myrank { font-family: var(--display); color: var(--amber); font-size: 1.05rem; }
+@media (prefers-reduced-motion: reduce) { button:active:not(:disabled) { transform: none; } }
+</style>
+<!-- BODY -->
+<div id="game">
+  <canvas id="cv" aria-label="게임 화면"></canvas>
+  <div class="hud" aria-live="off">
+    <div>
+      <div class="score" id="score">0</div>
+      <div class="lv" id="lv">Lv.1</div>
+    </div>
+    <button id="pauseBtn" type="button" aria-label="일시정지" hidden>❚❚</button>
+    <div class="right">
+      <div class="wallet">★ <span id="wallet">0</span></div>
+      <div class="best">최고 <span id="best">0</span></div>
+    </div>
+  </div>
+  <div class="note" id="note" role="status" hidden></div>
+  <div class="overlay" id="overlay">
+    <section class="card" id="start">
+      <h1>별똥별 피하기</h1>
+      <div class="titletag" data-title hidden></div>
+      <p>화면 아무 곳이나 손가락으로 좌우로 끌어서 떨어지는 운석을 피하세요. 15초마다 레벨이 오르고, 5레벨마다 운석 폭풍이 몰려와요.</p>
+      <div class="legend">
+        <span><i class="dot" style="background:#ff6a55"></i>보통</span>
+        <span><i class="dot" style="background:#4fd8ff"></i>작고 빠름</span>
+        <span><i class="dot" style="background:#9b7bff"></i>크고 느림</span>
+        <span><i class="dot" style="background:#7be06a"></i>지그재그</span>
+      </div>
+      <div class="btns">
+        <button id="startBtn" type="button">시작하기</button>
+        <div class="row3">
+          <button class="ghost" type="button" data-open="shop">상점</button>
+          <button class="ghost" type="button" data-open="ach">업적</button>
+          <button class="ghost" type="button" data-open="rank">랭킹</button>
+        </div>
+        <div class="row2">
+          <button class="toggle" type="button" data-setting="sfx">효과음</button>
+          <button class="toggle" type="button" data-setting="music">배경음</button>
+        </div>
+      </div>
+      <p style="font-size:.8rem">PC에서는 ← → 키로 움직이고 P 키로 멈춰요.</p>
+    </section>
+    <section class="card" id="over" hidden>
+      <h2 id="overHead">운석에 맞았어요</h2>
+      <div class="big" id="final">0</div>
+      <div class="newbest" id="newbest" hidden>새 최고 기록!</div>
+      <div class="gain" id="gain"></div>
+      <div class="sub" id="overInfo"></div>
+      <div class="newach" id="newAch" hidden></div>
+      <div class="rankbox" id="rankBox" hidden>
+        <div class="msg" id="rankMsg"></div>
+        <form class="nickrow" id="nickForm" hidden>
+          <input id="nickInput" type="text" maxlength="12" placeholder="닉네임 (12자까지)" autocomplete="nickname" enterkeyhint="done" aria-label="랭킹에 쓸 닉네임">
+          <button type="submit">등록</button>
+        </form>
+      </div>
+      <div class="btns">
+        <button id="againBtn" type="button">다시 하기</button>
+        <div class="row3">
+          <button class="ghost" type="button" data-open="shop">상점</button>
+          <button class="ghost" type="button" data-open="ach">업적</button>
+          <button class="ghost" type="button" data-open="rank">랭킹</button>
+        </div>
+      </div>
+    </section>
+    <section class="card" id="rank" hidden>
+      <div class="card-head">
+        <h2>랭킹</h2>
+        <div class="achcount" id="rankPlayers"></div>
+      </div>
+      <div class="myrank" id="myRank" hidden></div>
+      <div class="ranklist" id="rankList"></div>
+      <div class="rankstate" id="rankState" hidden></div>
+      <form class="nickrow" id="nickForm2">
+        <input id="nickInput2" type="text" maxlength="12" placeholder="닉네임 (12자까지)" autocomplete="nickname" enterkeyhint="done" aria-label="닉네임">
+        <button type="submit">저장</button>
+      </form>
+      <button class="ghost" type="button" data-back>닫기</button>
+    </section>
+    <section class="card" id="pause" hidden>
+      <h2 style="color:var(--amber);font-size:1.8rem">일시정지</h2>
+      <p id="pauseInfo"></p>
+      <div class="btns">
+        <button id="resumeBtn" type="button">계속하기</button>
+        <div class="row2">
+          <button class="toggle" type="button" data-setting="sfx">효과음</button>
+          <button class="toggle" type="button" data-setting="music">배경음</button>
+        </div>
+        <button id="quitBtn" class="ghost" type="button">그만하고 기록 보기</button>
+      </div>
+    </section>
+    <section class="card" id="shop" hidden>
+      <div class="card-head">
+        <h2>상점</h2>
+        <div class="purse">★ <span id="purse">0</span></div>
+      </div>
+      <canvas id="preview" aria-label="캐릭터 미리보기"></canvas>
+      <div class="tabs" role="tablist" id="tabs"></div>
+      <div class="items" id="items"></div>
+      <div class="toast" id="toast" aria-live="polite"></div>
+      <div class="btns">
+        <button id="actBtn" type="button">장착중</button>
+        <button class="ghost" type="button" data-back>닫기</button>
+      </div>
+    </section>
+    <section class="card" id="ach" hidden>
+      <div class="card-head">
+        <h2>업적</h2>
+        <div class="achcount" id="achCount"></div>
+      </div>
+      <p>업적을 달성하면 별을 받고, 칭호를 이름표처럼 달 수 있어요.</p>
+      <div class="achlist" id="achList"></div>
+      <button class="ghost" type="button" data-back>닫기</button>
+    </section>
+  </div>
+</div>
+<script>
+/*__SIM__*/
+/*__GAME__*/
+</script>
