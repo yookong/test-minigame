@@ -145,6 +145,36 @@ button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
 .ach .side { display: grid; justify-items: end; gap: 4px; font-size: 0.8rem; color: var(--mute); font-variant-numeric: tabular-nums; }
 .ach .side button { font-size: 0.85rem; padding: 6px 10px; }
 .ach .side button.using { background: var(--ink); }
+/* ranking */
+.row3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.row3 button { padding-inline: 6px; }
+.rankbox { display: grid; gap: 8px; padding: 12px; border-radius: 16px; background: var(--tile); }
+.rankbox .msg { font-family: var(--display); font-size: 1.05rem; color: var(--ink); word-break: keep-all; }
+.rankbox .msg.err { color: var(--mute); font-family: var(--body); font-size: 0.85rem; line-height: 1.5; }
+.nickrow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.nickrow input {
+  min-width: 0; font: 16px var(--body); color: var(--ink); background: rgba(8, 15, 39, 0.6);
+  border: 1px solid var(--line); border-radius: 999px; padding: 10px 14px;
+  -webkit-user-select: text; user-select: text; touch-action: manipulation;
+}
+.nickrow input:focus-visible { outline: 2px solid var(--amber); outline-offset: 1px; }
+.nickrow button { font-size: 1rem; padding: 10px 16px; }
+.ranklist { display: grid; gap: 6px; text-align: left; }
+.rk {
+  display: grid; grid-template-columns: 30px 40px minmax(0, 1fr) auto; align-items: center; gap: 8px;
+  padding: 8px 12px 8px 8px; border-radius: 14px; background: var(--tile);
+}
+.rk.me { border: 2px solid var(--amber); }
+.rk .no { font-family: var(--display); font-size: 1.2rem; text-align: center; color: var(--mute); font-variant-numeric: tabular-nums; }
+.rk:nth-child(1) .no { color: #ffd84a; } .rk:nth-child(2) .no { color: #dfe6f5; } .rk:nth-child(3) .no { color: #e8a374; }
+.rk canvas { width: 40px; height: 40px; }
+.rk .who { min-width: 0; }
+.rk .nm { font-family: var(--display); font-size: 1.05rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rk .tt { font-size: 0.76rem; color: var(--amber); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rk .sc { font-family: var(--display); font-size: 1.15rem; font-variant-numeric: tabular-nums; text-align: right; }
+.rk .sc small { display: block; font-family: var(--body); font-size: 0.72rem; color: var(--mute); }
+.rankstate { color: var(--mute); padding: 16px 0; font-size: 0.95rem; word-break: keep-all; }
+.myrank { font-family: var(--display); color: var(--amber); font-size: 1.05rem; }
 @media (prefers-reduced-motion: reduce) { button:active:not(:disabled) { transform: none; } }
 </style>
 <style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);background:#080f27}</style>
@@ -177,9 +207,10 @@ button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
       </div>
       <div class="btns">
         <button id="startBtn" type="button">시작하기</button>
-        <div class="row2">
+        <div class="row3">
           <button class="ghost" type="button" data-open="shop">상점</button>
           <button class="ghost" type="button" data-open="ach">업적</button>
+          <button class="ghost" type="button" data-open="rank">랭킹</button>
         </div>
         <div class="row2">
           <button class="toggle" type="button" data-setting="sfx">효과음</button>
@@ -195,13 +226,35 @@ button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
       <div class="gain" id="gain"></div>
       <div class="sub" id="overInfo"></div>
       <div class="newach" id="newAch" hidden></div>
+      <div class="rankbox" id="rankBox" hidden>
+        <div class="msg" id="rankMsg"></div>
+        <form class="nickrow" id="nickForm" hidden>
+          <input id="nickInput" type="text" maxlength="12" placeholder="닉네임 (12자까지)" autocomplete="nickname" enterkeyhint="done" aria-label="랭킹에 쓸 닉네임">
+          <button type="submit">등록</button>
+        </form>
+      </div>
       <div class="btns">
         <button id="againBtn" type="button">다시 하기</button>
-        <div class="row2">
+        <div class="row3">
           <button class="ghost" type="button" data-open="shop">상점</button>
           <button class="ghost" type="button" data-open="ach">업적</button>
+          <button class="ghost" type="button" data-open="rank">랭킹</button>
         </div>
       </div>
+    </section>
+    <section class="card" id="rank" hidden>
+      <div class="card-head">
+        <h2>랭킹</h2>
+        <div class="achcount" id="rankPlayers"></div>
+      </div>
+      <div class="myrank" id="myRank" hidden></div>
+      <div class="ranklist" id="rankList"></div>
+      <div class="rankstate" id="rankState" hidden></div>
+      <form class="nickrow" id="nickForm2">
+        <input id="nickInput2" type="text" maxlength="12" placeholder="닉네임 (12자까지)" autocomplete="nickname" enterkeyhint="done" aria-label="닉네임">
+        <button type="submit">저장</button>
+      </form>
+      <button class="ghost" type="button" data-back>닫기</button>
     </section>
     <section class="card" id="pause" hidden>
       <h2 style="color:var(--amber);font-size:1.8rem">일시정지</h2>
@@ -330,12 +383,18 @@ button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
       if (!raw.stats) save.stats.buys = save.owned.filter((o) => findItem(o.split(':')[0], o.split(':')[1]).price > 0).length;
     } else save.best = Number(localStorage.getItem('meteor-dodge-best')) || 0;
   } catch (e) {}
+  if (!/^[A-Za-z0-9-]{16,64}$/.test(save.device || '')) {
+    save.device = (crypto.randomUUID ? crypto.randomUUID()
+      : Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join(''));
+  }
+  save.nickname = save.nickname || '';
   const persist = () => { try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e) {} };
+  persist();
   const owns = (cat, id) => findItem(cat, id).price === 0 || save.owned.includes(cat + ':' + id);
 
   const scoreEl = $('score'), lvEl = $('lv'), walletEl = $('wallet'), bestEl = $('best');
   const overlay = $('overlay'), pauseBtn = $('pauseBtn');
-  const screens = { start: $('start'), over: $('over'), shop: $('shop'), ach: $('ach'), pause: $('pause') };
+  const screens = { start: $('start'), over: $('over'), shop: $('shop'), ach: $('ach'), pause: $('pause'), rank: $('rank') };
   function refreshHud() {
     walletEl.textContent = save.stars; bestEl.textContent = save.best;
     for (const el of document.querySelectorAll('[data-title]')) { el.hidden = !save.title; el.textContent = save.title; }
@@ -719,11 +778,124 @@ button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
     }
   }
 
+  // ================= ranking (Supabase) =================
+  const RANK_API = { url: 'https://tupljvsqfhvbrkkjffrx.supabase.co', key: 'sb_publishable_JfXZOw0mpDAoCPigCzR7sQ_FZY9uHfM' };
+  async function rpc(name, args) {
+    const res = await fetch(`${RANK_API.url}/rest/v1/rpc/${name}`, {
+      method: 'POST',
+      headers: { apikey: RANK_API.key, 'Content-Type': 'application/json' },
+      body: JSON.stringify(args),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) { const err = new Error((data && data.message) || 'HTTP ' + res.status); err.server = true; throw err; }
+    return data;
+  }
+  const rankError = (e) => {
+    if (!e || !e.server) return '랭킹 서버에 연결하지 못했어요. 인터넷 연결을 확인해 주세요. Claude 링크에서는 랭킹이 동작하지 않으니 GitHub Pages 주소에서 해주세요.';
+    if (/nickname/.test(e.message)) return '닉네임은 1~12자로 정해 주세요.';
+    if (/too many/.test(e.message)) return '짧은 시간에 너무 많이 시작했어요. 잠시 뒤에 다시 해주세요.';
+    return '기록을 확인하지 못해서 랭킹에 올리지 못했어요.';
+  };
+  const cleanNick = (s) => s.replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, 12);
+
+  let runTicket = null, pendingRun = null;
+  const rankBox = $('rankBox'), rankMsg = $('rankMsg'), nickForm = $('nickForm'), nickInput = $('nickInput');
+
+  async function submitRun(run) {
+    rankBox.hidden = false; nickForm.hidden = true;
+    rankMsg.className = 'msg'; rankMsg.textContent = '랭킹에 올리는 중…';
+    try {
+      const id = await run.ticket;
+      if (!id) throw new Error('offline');
+      const res = await rpc('submit_score', {
+        p_run: id, p_device: save.device, p_nickname: save.nickname, p_score: run.score, p_time: run.time,
+        p_stars: run.natStars, p_storms: run.storms, p_title: save.title,
+        p_look: { skin: save.equip.skin, hat: save.equip.hat, face: save.equip.face },
+      });
+      pendingRun = null;
+      rankMsg.textContent = run.score >= res.best ? `전체 ${res.rank}위에 올랐어요!` : `전체 ${res.rank}위 · 내 최고 ${res.best}점`;
+    } catch (e) {
+      rankMsg.className = 'msg err'; rankMsg.textContent = rankError(e);
+      if (e && e.server && /nickname/.test(e.message)) { nickForm.hidden = false; }
+    }
+  }
+
+  function rankAfterRun(run) {
+    pendingRun = null;
+    if (run.score <= 0) { rankBox.hidden = true; return; }
+    if (save.nickname) { submitRun(run); return; }
+    pendingRun = run;
+    rankBox.hidden = false; nickForm.hidden = false;
+    rankMsg.className = 'msg'; rankMsg.textContent = '닉네임을 정하면 랭킹에 올라가요';
+    nickInput.value = '';
+  }
+  nickForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const nick = cleanNick(nickInput.value);
+    if (!nick) { rankMsg.textContent = '닉네임을 입력해 주세요'; return; }
+    save.nickname = nick; persist();
+    nickInput.blur();
+    if (pendingRun) submitRun(pendingRun);
+  });
+
+  function lookIcon(look, size) {
+    const c = document.createElement('canvas');
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    c.width = c.height = size * dpr;
+    const g = c.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const l = { skin: findItem('skin', look && look.skin).id, hat: findItem('hat', look && look.hat).id, face: findItem('face', look && look.face).id };
+    drawHero(g, size / 2, size * (l.hat === 'none' ? 0.5 : 0.62), size * (l.hat === 'none' ? 0.3 : 0.26), l, 0);
+    return c;
+  }
+
+  let rankReq = 0;
+  async function loadRank() {
+    const list = $('rankList'), state = $('rankState'), mine = $('myRank');
+    $('nickInput2').value = save.nickname;
+    list.textContent = ''; mine.hidden = true; $('rankPlayers').textContent = '';
+    state.hidden = false; state.textContent = '불러오는 중…';
+    const req = ++rankReq;
+    try {
+      const data = await rpc('get_leaderboard', { p_device: save.device });
+      if (req !== rankReq) return;
+      $('rankPlayers').textContent = `${data.players}명`;
+      if (!data.top.length) { state.textContent = '아직 기록이 없어요. 첫 번째 주인공이 되어 보세요!'; return; }
+      state.hidden = true;
+      for (const r of data.top) {
+        const row = document.createElement('div');
+        row.className = 'rk' + (data.me && data.me.rank === r.rank && data.me.score === r.score && data.me.nickname === r.nickname ? ' me' : '');
+        const no = document.createElement('div'); no.className = 'no'; no.textContent = r.rank; row.appendChild(no);
+        row.appendChild(lookIcon(r.look, 40));
+        const who = document.createElement('div'); who.className = 'who';
+        const nm = document.createElement('div'); nm.className = 'nm'; nm.textContent = r.nickname; who.appendChild(nm);
+        if (r.title) { const tt = document.createElement('div'); tt.className = 'tt'; tt.textContent = r.title; who.appendChild(tt); }
+        row.appendChild(who);
+        const sc = document.createElement('div'); sc.className = 'sc'; sc.textContent = r.score;
+        const sm = document.createElement('small'); sm.textContent = `${Number(r.time).toFixed(1)}초`; sc.appendChild(sm);
+        row.appendChild(sc);
+        list.appendChild(row);
+      }
+      if (data.me) { mine.hidden = false; mine.textContent = `내 순위 ${data.me.rank}위 · ${data.me.score}점`; }
+    } catch (e) {
+      if (req !== rankReq) return;
+      state.textContent = rankError(e);
+    }
+  }
+  $('nickForm2').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const nick = cleanNick($('nickInput2').value), state = $('rankState');
+    $('nickInput2').blur();
+    if (!nick) return;
+    save.nickname = nick; persist();
+    try { await rpc('set_nickname', { p_device: save.device, p_nickname: nick }); loadRank(); }
+    catch (err) { state.hidden = false; state.textContent = rankError(err); }
+  });
+
   // ================= game state =================
   let W = 0, H = 0, unit = 1;
   let state = 'ready'; // ready | play | paused | countdown | dying | over
   let t = 0, bonus = 0, score = 0, spawnT = 0, starT = 3, dyingT = 0, runStars = 0, level = 1, trailT = 0;
-  let countdown = 0, boss = null, bossCleared = 0, achT = 0;
+  let countdown = 0, boss = null, bossCleared = 0, achT = 0, natStars = 0;
   let banner = { text: '', t: 0, color: C.amber };
   let rocks = [], stars = [], sparks = [], dots = [], trail = [];
   const player = { x: 0, y: 0, r: 14 };
@@ -745,7 +917,8 @@ button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
 
   function start() {
     t = 0; bonus = 0; score = 0; spawnT = 0.6; starT = rand(2.5, 4); runStars = 0; level = 1; achT = 0;
-    boss = null; bossCleared = 0; runAch = []; banner.t = 0;
+    boss = null; bossCleared = 0; runAch = []; banner.t = 0; natStars = 0;
+    runTicket = rpc('start_run', { p_device: save.device }).catch(() => null);
     rocks = []; stars = []; sparks = []; trail = [];
     player.x = W / 2;
     state = 'play';
@@ -797,7 +970,9 @@ button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
     na.textContent = '';
     for (const a of runAch) { const d = document.createElement('div'); d.textContent = `새 업적 「${a.name}」 ★+${a.reward}`; na.appendChild(d); }
     show('over');
-    $('againBtn').focus({ preventScroll: true });
+    rankAfterRun({ ticket: runTicket, score, time: Math.round(t * 10) / 10, natStars, storms: bossCleared });
+    runTicket = null;
+    if (nickForm.hidden) $('againBtn').focus({ preventScroll: true });
   }
 
   let returnTo = 'start';
@@ -806,6 +981,7 @@ button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
     overlay.hidden = false;
     if (name === 'shop') openShop();
     if (name === 'ach') renderAch();
+    if (name === 'rank') loadRank();
     if (name === 'start' || name === 'over') returnTo = name;
   }
 
@@ -826,6 +1002,7 @@ button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
   cv.addEventListener('pointerup', endDrag);
   cv.addEventListener('pointercancel', endDrag);
   addEventListener('keydown', (e) => {
+    if (e.target && e.target.tagName === 'INPUT') return;
     if (e.key === 'ArrowLeft' || e.key === 'a') keys.left = true;
     if (e.key === 'ArrowRight' || e.key === 'd') keys.right = true;
     if (e.key === 'p' || e.key === 'Escape') { if (state === 'play' || state === 'countdown') pause(); else if (state === 'paused') resume(); }
@@ -960,7 +1137,7 @@ button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
       }
       for (const s of stars) {
         if (!s.got && Math.hypot(s.x - player.x, s.y - player.y) < s.r + player.r) {
-          s.got = true; bonus += 50; runStars++; save.stars++; save.stats.totalStars++;
+          s.got = true; bonus += 50; runStars++; natStars++; save.stars++; save.stats.totalStars++;
           walletEl.textContent = save.stars;
           Sound.play('star');
           for (let i = 0; i < 12; i++) {
