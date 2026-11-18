@@ -1094,6 +1094,8 @@ function createSim(seed, worldH) {
   let sparks = [], dots = [], trail = [];
   const showBanner = (text, color = C.amber, dur = 1.6) => { banner = { text, t: dur, color }; };
   const runInfo = () => ({ time: sim.t, score: sim.score, stars: runStars, boss: sim.storms });
+  // same rounding the server uses for the leaderboard
+  const secs = () => (Math.round(sim.tick / 6) / 10).toFixed(1);
 
   const fitWorldH = () => Math.round(clamp(400 * H / Math.max(W, 1), 560, 900));
   function updateView() {
@@ -1151,7 +1153,7 @@ function createSim(seed, worldH) {
     }
     state = 'paused'; pauseBtn.hidden = true; dragId = null;
     Sound.music('off');
-    $('pauseInfo').textContent = `${sim.t.toFixed(1)}초 · Lv.${sim.level} · ${sim.score}점`;
+    $('pauseInfo').textContent = `${secs()}초 · Lv.${sim.level} · ${sim.score}점`;
     persist();
     show('pause');
   }
@@ -1215,7 +1217,7 @@ function createSim(seed, worldH) {
     $('final').textContent = score;
     $('newbest').hidden = !isNew;
     $('gain').textContent = runStars ? `별 ${runStars}개 획득 · 보유 ★${save.stars}` : `보유 ★${save.stars}`;
-    $('overInfo').textContent = `버틴 시간 ${sim.t.toFixed(1)}초 · Lv.${sim.level}${sim.storms ? ` · 폭풍 ${sim.storms}번 통과` : ''} · 최고 ${save.best}`;
+    $('overInfo').textContent = `버틴 시간 ${secs()}초 · Lv.${sim.level}${sim.storms ? ` · 폭풍 ${sim.storms}번 통과` : ''} · 최고 ${save.best}`;
     const na = $('newAch');
     na.hidden = !runAch.length;
     na.textContent = '';
