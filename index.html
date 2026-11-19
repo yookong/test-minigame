@@ -271,6 +271,31 @@ button.danger { color: var(--coral); border-color: rgba(255, 106, 85, 0.5); }
 .arow .acts button { font-size: 0.8rem; padding: 6px 10px; background: transparent; color: var(--ink); border: 1px solid var(--line); }
 .arow .acts button.danger { color: var(--coral); }
 .hud .lv .test { color: #7be06a; }
+#adminTabs { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+#adminTabs button { font-size: 0.82rem; padding-inline: 0; }
+.stat-state { color: var(--mute); font-size: 0.9rem; }
+.stat-body { display: grid; gap: 16px; }
+.tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.tile { padding: 10px 12px; border-radius: 12px; background: var(--tile); display: grid; gap: 2px; min-width: 0; }
+.tile .k { font-size: 0.75rem; color: var(--mute); }
+.tile .v { font-family: var(--display); font-size: 1.45rem; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.tile .s { font-size: 0.72rem; color: var(--mute); font-variant-numeric: tabular-nums; }
+.chart { display: grid; gap: 6px; }
+.chart-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.chart-title { font-family: var(--display); font-size: 1rem; }
+.chart-read { font-size: 0.78rem; color: var(--mute); font-variant-numeric: tabular-nums; text-align: right; min-height: 1.2em; }
+.bars {
+  position: relative; height: 96px; margin-top: 12px; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr);
+  align-items: end; border-bottom: 1px solid var(--line);
+}
+.bars .col { position: relative; height: 100%; display: flex; align-items: flex-end; justify-content: center; padding: 0 1px; background: none; border: 0; border-radius: 0; cursor: default; }
+.bars .bar { width: 100%; max-width: 22px; background: var(--amber); border-radius: 4px 4px 0 0; min-height: 0; }
+.bars .col.zero .bar { background: transparent; }
+.bars .col:hover .bar, .bars .col:focus-visible .bar, .bars .col.on .bar { background: var(--ink); }
+.bars .col:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+.bars .peak { position: absolute; bottom: calc(100% + 2px); left: 50%; transform: translateX(-50%); font-size: 0.7rem; color: var(--ink); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.axis { display: flex; justify-content: space-between; font-size: 0.7rem; color: var(--mute); font-variant-numeric: tabular-nums; }
+.chart-empty { font-size: 0.85rem; color: var(--mute); padding: 18px 0; text-align: center; border-bottom: 1px solid var(--line); }
 @media (max-height: 640px) { .logo { padding-top: 0; } .logo h1 { font-size: 2.6rem; } .daily { padding-block: 9px; } }
 @media (prefers-reduced-motion: reduce) { button:active:not(:disabled) { transform: none; } }
 </style>
@@ -339,6 +364,7 @@ button.danger { color: var(--coral); border-color: rgba(255, 106, 85, 0.5); }
       </div>
       <div class="tabs" role="tablist" id="adminTabs">
         <button type="button" role="tab" data-pane="version" aria-selected="true">버전</button>
+        <button type="button" role="tab" data-pane="stats" aria-selected="false">통계</button>
         <button type="button" role="tab" data-pane="reward" aria-selected="false">보상</button>
         <button type="button" role="tab" data-pane="game" aria-selected="false">게임</button>
         <button type="button" role="tab" data-pane="maint" aria-selected="false">점검</button>
@@ -348,6 +374,19 @@ button.danger { color: var(--coral); border-color: rgba(255, 106, 85, 0.5); }
         <p id="verText"></p>
         <a class="btnlink" id="verLink" href="./dev/">dev 버전 열기</a>
         <div class="set-note" id="verBuild"></div>
+      </div>
+      <div class="admin-pane" data-pane="stats" hidden>
+        <div class="seg" id="statPeriod">
+          <button type="button" data-v="1">오늘</button><button type="button" data-v="7">최근 7일</button><button type="button" data-v="0">전체</button>
+        </div>
+        <div class="stat-state" id="statState">불러오는 중…</div>
+        <div class="stat-body" id="statBody" hidden>
+          <div class="tiles" id="statTiles"></div>
+          <div class="chart" id="chartDays"></div>
+          <div class="chart" id="chartLevels"></div>
+          <div class="chart" id="chartHours"></div>
+          <div class="set-note">버틴 시간·점수·레벨·폭풍은 랭킹에 등록된 판 기준이에요. 한국 시간 기준이에요.</div>
+        </div>
       </div>
       <div class="admin-pane" data-pane="reward" hidden>
         <div class="set-label">이 기기에만 적용돼요</div>
@@ -758,7 +797,7 @@ function createSim(seed, worldH, opts) {
   const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const C = { amber: '#ffc45c', coral: '#ff6a55', ink: '#f4efe4', deep: '#080f27', boss: '#ff3d5e' };
   const DT = 1 / 60;
-  const BUILD = '2026-11-19 12:48 빌드 · 기준 커밋 dc2e232';
+  const BUILD = '2026-11-19 13:07 빌드 · 기준 커밋 a4f07de';
   const isDev = /\/dev\//.test(location.pathname);
 
   // ================= catalog =================
@@ -2128,9 +2167,88 @@ function createSim(seed, worldH, opts) {
       $('verLink').textContent = isDev ? '정식 버전으로 가기' : 'dev 버전 열기';
       $('verBuild').textContent = BUILD.startsWith('__') ? '' : `이 버전: ${BUILD}`;
     }
+    if (adminPane === 'stats') loadStats();
     if (adminPane === 'game') renderTest();
     if (adminPane === 'maint') renderMaint();
     if (adminPane === 'rank') loadAdminScores();
+  }
+
+  // statistics
+  let statDays = 7, statReq = 0;
+  for (const b of $('statPeriod').children) b.addEventListener('click', () => { statDays = Number(b.dataset.v); loadStats(); });
+  const fmt = (n) => Number(n || 0).toLocaleString('ko-KR');
+  function tile(k, v, sub) {
+    const el = document.createElement('div'); el.className = 'tile';
+    const a = document.createElement('div'); a.className = 'k'; a.textContent = k;
+    const b = document.createElement('div'); b.className = 'v'; b.textContent = v;
+    el.append(a, b);
+    if (sub) { const c = document.createElement('div'); c.className = 's'; c.textContent = sub; el.appendChild(c); }
+    return el;
+  }
+  // Single-series bar chart: one hue, peak labelled directly, tap/hover reads the exact value.
+  function barChart(box, title, rows, unit, axisLabels) {
+    box.textContent = '';
+    const head = document.createElement('div'); head.className = 'chart-head';
+    const t = document.createElement('div'); t.className = 'chart-title'; t.textContent = title;
+    const read = document.createElement('div'); read.className = 'chart-read';
+    head.append(t, read); box.appendChild(head);
+    const max = Math.max(0, ...rows.map((r) => r.n));
+    if (!max) { const e = document.createElement('div'); e.className = 'chart-empty'; e.textContent = '아직 데이터가 없어요'; box.appendChild(e); return; }
+    const bars = document.createElement('div'); bars.className = 'bars';
+    const peakIdx = rows.findIndex((r) => r.n === max);
+    const idle = `가장 많음 ${rows[peakIdx].label} · ${fmt(max)}${unit}`;
+    read.textContent = idle;
+    rows.forEach((r, i) => {
+      const col = document.createElement('button'); col.type = 'button'; col.className = 'col' + (r.n ? '' : ' zero');
+      col.setAttribute('aria-label', `${r.label} ${fmt(r.n)}${unit}`);
+      const bar = document.createElement('div'); bar.className = 'bar';
+      bar.style.height = r.n ? `${Math.max(3, r.n / max * 100)}%` : '0';
+      col.appendChild(bar);
+      if (i === peakIdx) { const pk = document.createElement('span'); pk.className = 'peak'; pk.textContent = fmt(max); bar.style.position = 'relative'; bar.appendChild(pk); }
+      const showVal = () => { for (const c of bars.children) c.classList.toggle('on', c === col); read.textContent = `${r.label} · ${fmt(r.n)}${unit}`; };
+      col.addEventListener('pointerenter', showVal);
+      col.addEventListener('focus', showVal);
+      col.addEventListener('click', showVal);
+      col.addEventListener('pointerleave', () => { col.classList.remove('on'); read.textContent = idle; });
+      bars.appendChild(col);
+    });
+    box.appendChild(bars);
+    const axis = document.createElement('div'); axis.className = 'axis';
+    for (const a of axisLabels) { const s = document.createElement('span'); s.textContent = a; axis.appendChild(s); }
+    box.appendChild(axis);
+  }
+  async function loadStats() {
+    for (const b of $('statPeriod').children) b.setAttribute('aria-pressed', String(Number(b.dataset.v) === statDays));
+    const state = $('statState'), body = $('statBody');
+    state.hidden = false; state.textContent = '불러오는 중…';
+    const req = ++statReq;
+    try {
+      const st = await adminRpc('admin_stats', { p_days: statDays });
+      if (req !== statReq) return;
+      state.hidden = true; body.hidden = false;
+      const tiles = $('statTiles'); tiles.textContent = '';
+      tiles.append(
+        tile('시작한 판', fmt(st.runs), `랭킹 등록 ${fmt(st.ranked)}판`),
+        tile('플레이한 사람', fmt(st.players), `처음 온 사람 ${fmt(st.new_players)}명`),
+        tile('평균 버틴 시간', st.avg_time == null ? '-' : `${Number(st.avg_time).toFixed(1)}초`, st.median_time == null ? '' : `가운데 값 ${Number(st.median_time).toFixed(1)}초`),
+        tile('평균 점수', st.avg_score == null ? '-' : fmt(st.avg_score), st.top_score == null ? '' : `최고 ${fmt(st.top_score)}점`),
+        tile('폭풍 통과율', st.storm_reach ? `${Math.round(st.storm_clear / st.storm_reach * 100)}%` : '-', `60초 넘긴 판 ${fmt(st.storm_reach)} 중 ${fmt(st.storm_clear)}판 통과`),
+        tile('1인당 판 수', st.players ? `${(st.runs / st.players).toFixed(1)}판` : '-', '한 사람이 평균 몇 판 했는지'),
+      );
+      const days = st.days || [];
+      barChart($('chartDays'), '최근 14일 시작한 판', days.map((d) => ({ label: d.day, n: d.n })), '판',
+        days.length ? [days[0].day, days[7] ? days[7].day : '', '오늘'] : []);
+      const lv = new Map((st.levels || []).map((x) => [x.level, x.n]));
+      barChart($('chartLevels'), '판이 끝난 레벨', Array.from({ length: 10 }, (_, i) => ({ label: i === 9 ? 'Lv.10 이상' : `Lv.${i + 1}`, n: lv.get(i + 1) || 0 })), '판',
+        ['Lv.1', 'Lv.5 (첫 폭풍)', 'Lv.10+']);
+      const hr = new Map((st.hours || []).map((x) => [x.hour, x.n]));
+      barChart($('chartHours'), '시간대별 시작한 판', Array.from({ length: 24 }, (_, h) => ({ label: `${h}시`, n: hr.get(h) || 0 })), '판',
+        ['0시', '6시', '12시', '18시', '23시']);
+    } catch (e) {
+      if (req !== statReq) return;
+      body.hidden = true;
+      state.textContent = e.server ? '불러오지 못했어요: ' + e.message : '서버에 연결하지 못했어요.';
+    }
   }
 
   // rewards and screens (this device only)

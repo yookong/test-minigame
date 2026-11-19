@@ -8,7 +8,7 @@
 --   세 테이블 모두 RLS 를 켜고 정책을 두지 않아서, 공개 키로는 직접 읽거나 쓸 수 없습니다.
 --
 -- 공개 키(anon)로 부를 수 있는 함수: get_status, start_run, heartbeat, get_leaderboard, set_nickname
--- 관리자 키가 있어야 하는 함수: admin_set_maintenance, admin_list_scores, admin_hide_score, admin_delete_score, admin_reset_ranking
+-- 관리자 키가 있어야 하는 함수: admin_stats, admin_set_maintenance, admin_list_scores, admin_hide_score, admin_delete_score, admin_reset_ranking
 -- 서버 전용(service_role) 함수: get_run_check, finalize_run
 --   → Edge Function "verify-run" 이 게임을 서버에서 다시 돌려 점수를 직접 계산한 뒤 finalize_run 으로 기록합니다.
 --
@@ -272,7 +272,51 @@ begin
   truncate table scores, beats, runs restart identity;
 end $$;
 
+-- 관리자 통계. p_days: 1 = 오늘, 7 = 최근 7일, 0 = 전체 (날짜 기준은 한국 시간)
+-- 버틴 시간·점수·레벨·폭풍은 랭킹에 등록된 판(scores) 기준, 판 수·사람 수·시간대는 시작한 판(runs) 기준입니다.
+create or replace function public.admin_stats(p_key text, p_days int)
+returns json language plpgsql stable security definer set search_path = public as $$
+declare
+  tz constant text := 'Asia/Seoul';
+  v_today date := (now() at time zone tz)::date;
+  v_from timestamptz;
+begin
+  if not is_owner(p_key) then raise exception 'not owner'; end if;
+  v_from := case when coalesce(p_days, 0) <= 0 then '-infinity'::timestamptz
+                 else ((v_today - (p_days - 1))::timestamp at time zone tz) end;
+  return json_build_object(
+    'runs', (select count(*) from runs where started_at >= v_from),
+    'players', (select count(distinct device) from runs where started_at >= v_from),
+    'new_players', (select count(*) from (select min(started_at) as first from runs group by device) d where d.first >= v_from),
+    'ranked', (select count(*) from scores where created_at >= v_from),
+    'avg_time', (select round(avg(time_s), 1) from scores where created_at >= v_from),
+    'median_time', (select round((percentile_cont(0.5) within group (order by time_s))::numeric, 1) from scores where created_at >= v_from),
+    'avg_score', (select round(avg(score)) from scores where created_at >= v_from),
+    'top_score', (select max(score) from scores where created_at >= v_from and not hidden),
+    'storm_reach', (select count(*) from scores where created_at >= v_from and time_s >= 60),
+    'storm_clear', (select count(*) from scores where created_at >= v_from and storms >= 1),
+    'levels', (
+      select coalesce(json_agg(json_build_object('level', lv, 'n', n) order by lv), '[]'::json)
+      from (select least(1 + floor(time_s / 15)::int, 10) as lv, count(*) as n
+            from scores where created_at >= v_from group by 1) x
+    ),
+    'hours', (
+      select coalesce(json_agg(json_build_object('hour', h, 'n', n) order by h), '[]'::json)
+      from (select extract(hour from started_at at time zone tz)::int as h, count(*) as n
+            from runs where started_at >= v_from group by 1) x
+    ),
+    'days', (
+      select json_agg(json_build_object(
+        'day', to_char(v_today - (13 - i), 'MM/DD'),
+        'n', (select count(*) from runs where (started_at at time zone tz)::date = v_today - (13 - i))
+      ) order by i)
+      from generate_series(0, 13) as i
+    )
+  );
+end $$;
+
 revoke all on function public.clean_nickname(text) from public, anon, authenticated;
+revoke all on function public.admin_stats(text, int) from public, anon, authenticated;
 revoke all on function public.is_owner(text) from public, anon, authenticated;
 revoke all on function public.admin_set_maintenance(text, boolean, text) from public, anon, authenticated;
 revoke all on function public.admin_list_scores(text) from public, anon, authenticated;
@@ -301,3 +345,4 @@ grant execute on function public.admin_list_scores(text) to anon, authenticated;
 grant execute on function public.admin_hide_score(text, bigint, boolean, boolean) to anon, authenticated;
 grant execute on function public.admin_delete_score(text, bigint) to anon, authenticated;
 grant execute on function public.admin_reset_ranking(text) to anon, authenticated;
+grant execute on function public.admin_stats(text, int) to anon, authenticated;

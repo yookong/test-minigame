@@ -1375,9 +1375,88 @@
       $('verLink').textContent = isDev ? '정식 버전으로 가기' : 'dev 버전 열기';
       $('verBuild').textContent = BUILD.startsWith('__') ? '' : `이 버전: ${BUILD}`;
     }
+    if (adminPane === 'stats') loadStats();
     if (adminPane === 'game') renderTest();
     if (adminPane === 'maint') renderMaint();
     if (adminPane === 'rank') loadAdminScores();
+  }
+
+  // statistics
+  let statDays = 7, statReq = 0;
+  for (const b of $('statPeriod').children) b.addEventListener('click', () => { statDays = Number(b.dataset.v); loadStats(); });
+  const fmt = (n) => Number(n || 0).toLocaleString('ko-KR');
+  function tile(k, v, sub) {
+    const el = document.createElement('div'); el.className = 'tile';
+    const a = document.createElement('div'); a.className = 'k'; a.textContent = k;
+    const b = document.createElement('div'); b.className = 'v'; b.textContent = v;
+    el.append(a, b);
+    if (sub) { const c = document.createElement('div'); c.className = 's'; c.textContent = sub; el.appendChild(c); }
+    return el;
+  }
+  // Single-series bar chart: one hue, peak labelled directly, tap/hover reads the exact value.
+  function barChart(box, title, rows, unit, axisLabels) {
+    box.textContent = '';
+    const head = document.createElement('div'); head.className = 'chart-head';
+    const t = document.createElement('div'); t.className = 'chart-title'; t.textContent = title;
+    const read = document.createElement('div'); read.className = 'chart-read';
+    head.append(t, read); box.appendChild(head);
+    const max = Math.max(0, ...rows.map((r) => r.n));
+    if (!max) { const e = document.createElement('div'); e.className = 'chart-empty'; e.textContent = '아직 데이터가 없어요'; box.appendChild(e); return; }
+    const bars = document.createElement('div'); bars.className = 'bars';
+    const peakIdx = rows.findIndex((r) => r.n === max);
+    const idle = `가장 많음 ${rows[peakIdx].label} · ${fmt(max)}${unit}`;
+    read.textContent = idle;
+    rows.forEach((r, i) => {
+      const col = document.createElement('button'); col.type = 'button'; col.className = 'col' + (r.n ? '' : ' zero');
+      col.setAttribute('aria-label', `${r.label} ${fmt(r.n)}${unit}`);
+      const bar = document.createElement('div'); bar.className = 'bar';
+      bar.style.height = r.n ? `${Math.max(3, r.n / max * 100)}%` : '0';
+      col.appendChild(bar);
+      if (i === peakIdx) { const pk = document.createElement('span'); pk.className = 'peak'; pk.textContent = fmt(max); bar.style.position = 'relative'; bar.appendChild(pk); }
+      const showVal = () => { for (const c of bars.children) c.classList.toggle('on', c === col); read.textContent = `${r.label} · ${fmt(r.n)}${unit}`; };
+      col.addEventListener('pointerenter', showVal);
+      col.addEventListener('focus', showVal);
+      col.addEventListener('click', showVal);
+      col.addEventListener('pointerleave', () => { col.classList.remove('on'); read.textContent = idle; });
+      bars.appendChild(col);
+    });
+    box.appendChild(bars);
+    const axis = document.createElement('div'); axis.className = 'axis';
+    for (const a of axisLabels) { const s = document.createElement('span'); s.textContent = a; axis.appendChild(s); }
+    box.appendChild(axis);
+  }
+  async function loadStats() {
+    for (const b of $('statPeriod').children) b.setAttribute('aria-pressed', String(Number(b.dataset.v) === statDays));
+    const state = $('statState'), body = $('statBody');
+    state.hidden = false; state.textContent = '불러오는 중…';
+    const req = ++statReq;
+    try {
+      const st = await adminRpc('admin_stats', { p_days: statDays });
+      if (req !== statReq) return;
+      state.hidden = true; body.hidden = false;
+      const tiles = $('statTiles'); tiles.textContent = '';
+      tiles.append(
+        tile('시작한 판', fmt(st.runs), `랭킹 등록 ${fmt(st.ranked)}판`),
+        tile('플레이한 사람', fmt(st.players), `처음 온 사람 ${fmt(st.new_players)}명`),
+        tile('평균 버틴 시간', st.avg_time == null ? '-' : `${Number(st.avg_time).toFixed(1)}초`, st.median_time == null ? '' : `가운데 값 ${Number(st.median_time).toFixed(1)}초`),
+        tile('평균 점수', st.avg_score == null ? '-' : fmt(st.avg_score), st.top_score == null ? '' : `최고 ${fmt(st.top_score)}점`),
+        tile('폭풍 통과율', st.storm_reach ? `${Math.round(st.storm_clear / st.storm_reach * 100)}%` : '-', `60초 넘긴 판 ${fmt(st.storm_reach)} 중 ${fmt(st.storm_clear)}판 통과`),
+        tile('1인당 판 수', st.players ? `${(st.runs / st.players).toFixed(1)}판` : '-', '한 사람이 평균 몇 판 했는지'),
+      );
+      const days = st.days || [];
+      barChart($('chartDays'), '최근 14일 시작한 판', days.map((d) => ({ label: d.day, n: d.n })), '판',
+        days.length ? [days[0].day, days[7] ? days[7].day : '', '오늘'] : []);
+      const lv = new Map((st.levels || []).map((x) => [x.level, x.n]));
+      barChart($('chartLevels'), '판이 끝난 레벨', Array.from({ length: 10 }, (_, i) => ({ label: i === 9 ? 'Lv.10 이상' : `Lv.${i + 1}`, n: lv.get(i + 1) || 0 })), '판',
+        ['Lv.1', 'Lv.5 (첫 폭풍)', 'Lv.10+']);
+      const hr = new Map((st.hours || []).map((x) => [x.hour, x.n]));
+      barChart($('chartHours'), '시간대별 시작한 판', Array.from({ length: 24 }, (_, h) => ({ label: `${h}시`, n: hr.get(h) || 0 })), '판',
+        ['0시', '6시', '12시', '18시', '23시']);
+    } catch (e) {
+      if (req !== statReq) return;
+      body.hidden = true;
+      state.textContent = e.server ? '불러오지 못했어요: ' + e.message : '서버에 연결하지 못했어요.';
+    }
   }
 
   // rewards and screens (this device only)
