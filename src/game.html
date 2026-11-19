@@ -259,6 +259,31 @@ button.danger { color: var(--coral); border-color: rgba(255, 106, 85, 0.5); }
 .arow .acts button { font-size: 0.8rem; padding: 6px 10px; background: transparent; color: var(--ink); border: 1px solid var(--line); }
 .arow .acts button.danger { color: var(--coral); }
 .hud .lv .test { color: #7be06a; }
+#adminTabs { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+#adminTabs button { font-size: 0.82rem; padding-inline: 0; }
+.stat-state { color: var(--mute); font-size: 0.9rem; }
+.stat-body { display: grid; gap: 16px; }
+.tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.tile { padding: 10px 12px; border-radius: 12px; background: var(--tile); display: grid; gap: 2px; min-width: 0; }
+.tile .k { font-size: 0.75rem; color: var(--mute); }
+.tile .v { font-family: var(--display); font-size: 1.45rem; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.tile .s { font-size: 0.72rem; color: var(--mute); font-variant-numeric: tabular-nums; }
+.chart { display: grid; gap: 6px; }
+.chart-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.chart-title { font-family: var(--display); font-size: 1rem; }
+.chart-read { font-size: 0.78rem; color: var(--mute); font-variant-numeric: tabular-nums; text-align: right; min-height: 1.2em; }
+.bars {
+  position: relative; height: 96px; margin-top: 12px; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr);
+  align-items: end; border-bottom: 1px solid var(--line);
+}
+.bars .col { position: relative; height: 100%; display: flex; align-items: flex-end; justify-content: center; padding: 0 1px; background: none; border: 0; border-radius: 0; cursor: default; }
+.bars .bar { width: 100%; max-width: 22px; background: var(--amber); border-radius: 4px 4px 0 0; min-height: 0; }
+.bars .col.zero .bar { background: transparent; }
+.bars .col:hover .bar, .bars .col:focus-visible .bar, .bars .col.on .bar { background: var(--ink); }
+.bars .col:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+.bars .peak { position: absolute; bottom: calc(100% + 2px); left: 50%; transform: translateX(-50%); font-size: 0.7rem; color: var(--ink); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.axis { display: flex; justify-content: space-between; font-size: 0.7rem; color: var(--mute); font-variant-numeric: tabular-nums; }
+.chart-empty { font-size: 0.85rem; color: var(--mute); padding: 18px 0; text-align: center; border-bottom: 1px solid var(--line); }
 @media (max-height: 640px) { .logo { padding-top: 0; } .logo h1 { font-size: 2.6rem; } .daily { padding-block: 9px; } }
 @media (prefers-reduced-motion: reduce) { button:active:not(:disabled) { transform: none; } }
 </style>
@@ -325,6 +350,7 @@ button.danger { color: var(--coral); border-color: rgba(255, 106, 85, 0.5); }
       </div>
       <div class="tabs" role="tablist" id="adminTabs">
         <button type="button" role="tab" data-pane="version" aria-selected="true">버전</button>
+        <button type="button" role="tab" data-pane="stats" aria-selected="false">통계</button>
         <button type="button" role="tab" data-pane="reward" aria-selected="false">보상</button>
         <button type="button" role="tab" data-pane="game" aria-selected="false">게임</button>
         <button type="button" role="tab" data-pane="maint" aria-selected="false">점검</button>
@@ -334,6 +360,19 @@ button.danger { color: var(--coral); border-color: rgba(255, 106, 85, 0.5); }
         <p id="verText"></p>
         <a class="btnlink" id="verLink" href="./dev/">dev 버전 열기</a>
         <div class="set-note" id="verBuild"></div>
+      </div>
+      <div class="admin-pane" data-pane="stats" hidden>
+        <div class="seg" id="statPeriod">
+          <button type="button" data-v="1">오늘</button><button type="button" data-v="7">최근 7일</button><button type="button" data-v="0">전체</button>
+        </div>
+        <div class="stat-state" id="statState">불러오는 중…</div>
+        <div class="stat-body" id="statBody" hidden>
+          <div class="tiles" id="statTiles"></div>
+          <div class="chart" id="chartDays"></div>
+          <div class="chart" id="chartLevels"></div>
+          <div class="chart" id="chartHours"></div>
+          <div class="set-note">버틴 시간·점수·레벨·폭풍은 랭킹에 등록된 판 기준이에요. 한국 시간 기준이에요.</div>
+        </div>
       </div>
       <div class="admin-pane" data-pane="reward" hidden>
         <div class="set-label">이 기기에만 적용돼요</div>
