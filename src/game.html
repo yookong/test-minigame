@@ -390,7 +390,14 @@ button.danger { color: var(--coral); border-color: rgba(255, 106, 85, 0.5); }
       <h1 style="font-size:1.8rem">관리자 전용 미리보기</h1>
       <p id="gateText">새 기능을 미리 확인하는 주소예요. 정식 게임은 아래에서 할 수 있어요.</p>
       <a class="btnlink" href="../">정식 게임으로 가기</a>
-      <button class="ghost" type="button" id="gateRetry">관리자 확인 다시 하기</button>
+      <div class="set-group">
+        <div class="set-label">관리자라면 키를 입력하세요</div>
+        <form class="nickrow" id="gateForm">
+          <input id="gateKey" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="관리자 키" aria-label="관리자 키">
+          <button type="submit">확인</button>
+        </form>
+        <div class="set-note" id="gateNote">이 기기에 한 번만 입력하면 기억돼요.</div>
+      </div>
     </section>
     <section class="card" id="welcome" hidden>
       <h1>어서 와요!</h1>

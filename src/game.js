@@ -1327,6 +1327,7 @@
       $('adminBadge').hidden = !(st.maintenance && st.owner);
       if (st.message) $('maintMsg').textContent = st.message;
     } catch (e) {
+      lastStatus = null;
       maintenance = false; // server unreachable or not set up: let people play (unranked)
     }
     statusKnown = true;
@@ -1339,7 +1340,19 @@
     } else if (!screens.maint.hidden || !screens.gate.hidden) { goHome(); afterHome(); }
     return maintenance;
   }
-  $('gateRetry').addEventListener('click', () => checkStatus());
+  $('gateForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const key = $('gateKey').value.trim().replace(/^.*#owner-/, ''), gateNote = $('gateNote');
+    $('gateKey').blur();
+    if (!/^[A-Za-z0-9]{8,64}$/.test(key)) { gateNote.textContent = '키 형식이 맞지 않아요. 영문과 숫자만 입력해 주세요.'; return; }
+    gateNote.textContent = '확인하는 중…';
+    const prev = save.ownerKey;
+    save.ownerKey = key;
+    await checkStatus();
+    if (isOwner) { persist(); $('gateKey').value = ''; note('관리자로 등록했어요'); return; }
+    save.ownerKey = prev;
+    gateNote.textContent = statusKnown && lastStatus ? '키가 맞지 않아요. 다시 확인해 주세요.' : '서버에 연결하지 못했어요. 인터넷 연결을 확인해 주세요.';
+  });
   $('maintRetry').addEventListener('click', async () => {
     $('maintRetry').disabled = true; $('maintRetry').textContent = '확인 중…';
     await checkStatus();
