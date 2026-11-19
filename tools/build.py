@@ -17,7 +17,16 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 SRC = ROOT / 'src'
 
 sim = (SRC / 'sim.js').read_text()
-game = (SRC / 'game.js').read_text()
+import datetime
+import subprocess
+
+try:
+    commit = subprocess.run(['git', 'rev-parse', '--short', 'HEAD'], cwd=ROOT, capture_output=True, text=True).stdout.strip()
+except OSError:
+    commit = ''
+stamp = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9))).strftime('%Y-%m-%d %H:%M')
+build = ' · '.join(x for x in [stamp + ' 빌드', f'기준 커밋 {commit}' if commit else ''] if x)
+game = (SRC / 'game.js').read_text().replace("'__BUILD__'", repr(build))
 page = (SRC / 'game.html').read_text().replace('/*__SIM__*/', sim).replace('/*__GAME__*/', game)
 
 head, body = page.split('<!-- BODY -->\n')

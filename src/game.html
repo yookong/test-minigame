@@ -234,6 +234,31 @@ button.danger { color: var(--coral); border-color: rgba(255, 106, 85, 0.5); }
 .legend-list { display: grid; gap: 6px; }
 .legend-list div { display: flex; align-items: center; gap: 8px; font-size: 0.88rem; color: var(--mute); }
 .legend-list b { color: var(--ink); font-weight: 600; }
+/* admin */
+.admin-link { justify-self: center; background: transparent; color: var(--coral); padding: 4px 8px; font-family: var(--body); font-size: 0.85rem; text-decoration: underline; text-underline-offset: 3px; }
+.dev-badge { font-size: 0.8rem; color: var(--sky-deep); background: #7be06a; border-radius: 999px; padding: 3px 10px; font-weight: 700; letter-spacing: 1px; }
+.admin-pane { display: grid; gap: 10px; text-align: left; }
+.admin-pane .row2 button, .admin-pane .row3 button { font-size: 0.92rem; padding: 10px 6px; }
+.admin-pane > button.ghost { font-size: 1rem; }
+.btnlink {
+  display: block; text-align: center; text-decoration: none; font-family: var(--display); font-size: 1.15rem;
+  padding: 12px 18px; border-radius: 999px; background: var(--amber); color: var(--sky-deep);
+}
+.seg { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 4px; background: var(--tile); padding: 4px; border-radius: 999px; }
+.seg button { font-size: 0.92rem; padding: 8px 2px; background: transparent; color: var(--mute); }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--sky-deep); }
+.maint-state { font-family: var(--display); font-size: 1.1rem; }
+.maint-state.on { color: var(--coral); }
+.admin-scores { display: grid; gap: 6px; max-height: 46vh; overflow-y: auto; }
+.arow { display: grid; gap: 6px; padding: 9px 10px; border-radius: 12px; background: var(--tile); }
+.arow.hid { opacity: 0.5; }
+.arow .top { display: flex; justify-content: space-between; gap: 8px; font-variant-numeric: tabular-nums; }
+.arow .nm { font-family: var(--display); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.arow .meta { font-size: 0.75rem; color: var(--mute); }
+.arow .acts { display: flex; gap: 6px; flex-wrap: wrap; }
+.arow .acts button { font-size: 0.8rem; padding: 6px 10px; background: transparent; color: var(--ink); border: 1px solid var(--line); }
+.arow .acts button.danger { color: var(--coral); }
+.hud .lv .test { color: #7be06a; }
 @media (max-height: 640px) { .logo { padding-top: 0; } .logo h1 { font-size: 2.6rem; } .daily { padding-block: 9px; } }
 @media (prefers-reduced-motion: reduce) { button:active:not(:disabled) { transform: none; } }
 </style>
@@ -268,6 +293,7 @@ button.danger { color: var(--coral); border-color: rgba(255, 106, 85, 0.5); }
       <div class="logo">
         <h1>별똥별<br>피하기</h1>
         <div class="admin-badge" id="adminBadge" hidden>점검 모드 · 관리자로 플레이 중</div>
+        <div class="dev-badge" id="devBadge" hidden>DEV 미리보기</div>
       </div>
       <div class="home-stage" id="homeStage"></div>
       <div class="home-bottom">
@@ -289,7 +315,82 @@ button.danger { color: var(--coral); border-color: rgba(255, 106, 85, 0.5); }
           <button class="ghost" type="button" data-open="help">게임 방법</button>
         </nav>
         <button class="install-link" type="button" data-install hidden>앱으로 설치하기</button>
+        <button class="admin-link" type="button" data-open="admin" id="adminBtn" hidden>관리자 메뉴</button>
       </div>
+    </section>
+    <section class="card" id="admin" hidden>
+      <div class="card-head">
+        <h2>관리자</h2>
+        <div class="achcount" id="adminChannel"></div>
+      </div>
+      <div class="tabs" role="tablist" id="adminTabs">
+        <button type="button" role="tab" data-pane="version" aria-selected="true">버전</button>
+        <button type="button" role="tab" data-pane="reward" aria-selected="false">보상</button>
+        <button type="button" role="tab" data-pane="game" aria-selected="false">게임</button>
+        <button type="button" role="tab" data-pane="maint" aria-selected="false">점검</button>
+        <button type="button" role="tab" data-pane="rank" aria-selected="false">랭킹</button>
+      </div>
+      <div class="admin-pane" data-pane="version">
+        <p id="verText"></p>
+        <a class="btnlink" id="verLink" href="./dev/">dev 버전 열기</a>
+        <div class="set-note" id="verBuild"></div>
+      </div>
+      <div class="admin-pane" data-pane="reward" hidden>
+        <div class="set-label">이 기기에만 적용돼요</div>
+        <div class="row3">
+          <button class="ghost" type="button" data-act="stars10">★ +10</button>
+          <button class="ghost" type="button" data-act="stars100">★ +100</button>
+          <button class="ghost" type="button" data-act="unlock">아이템 전부</button>
+        </div>
+        <div class="row2">
+          <button class="ghost" type="button" data-act="attend">출석 다시 받기</button>
+          <button class="ghost" type="button" data-act="welcome">처음 안내 보기</button>
+        </div>
+        <div class="row2">
+          <button class="ghost" type="button" data-act="chDone">오늘의 도전 달성</button>
+          <button class="ghost" type="button" data-act="chReset">오늘의 도전 초기화</button>
+        </div>
+        <button class="ghost" type="button" data-act="achReset">업적 초기화</button>
+        <div class="set-note" id="adminNote"></div>
+      </div>
+      <div class="admin-pane" data-pane="game" hidden>
+        <div class="set-label">테스트 판은 랭킹·업적·최고 기록에 반영되지 않아요</div>
+        <button class="toggle" type="button" id="tInvincible">무적 꺼짐</button>
+        <div class="set-label">시작 레벨</div>
+        <div class="seg" id="tLevel">
+          <button type="button" data-v="1">1</button><button type="button" data-v="3">3</button>
+          <button type="button" data-v="5">5 (폭풍)</button><button type="button" data-v="10">10 (폭풍)</button>
+        </div>
+        <div class="set-label">게임 속도</div>
+        <div class="seg" id="tSpeed">
+          <button type="button" data-v="0.5">0.5배</button><button type="button" data-v="1">1배</button><button type="button" data-v="2">2배</button>
+        </div>
+        <button type="button" id="testStart">테스트 판 시작</button>
+      </div>
+      <div class="admin-pane" data-pane="maint" hidden>
+        <div class="maint-state" id="maintState">확인 중…</div>
+        <div class="set-label">점검 화면에 보일 문구</div>
+        <form class="nickrow" id="maintForm">
+          <input id="maintText" type="text" maxlength="200" placeholder="새 기능을 준비하고 있어요. 잠시 후 다시 와주세요!" aria-label="점검 문구">
+        </form>
+        <div class="row2">
+          <button type="button" id="maintOn">점검 켜기</button>
+          <button class="ghost" type="button" id="maintOff">점검 끄기</button>
+        </div>
+        <div class="set-note">켜면 관리자 기기 말고는 점검 화면만 보이고 게임을 시작할 수 없어요.</div>
+      </div>
+      <div class="admin-pane" data-pane="rank" hidden>
+        <div class="set-note">점수가 높은 기록 60개예요. 숨긴 기록은 랭킹에 안 보여요.</div>
+        <div class="admin-scores" id="adminScores"></div>
+        <button class="ghost danger" type="button" id="rankReset">랭킹 전체 초기화</button>
+      </div>
+      <button class="ghost" type="button" data-back>닫기</button>
+    </section>
+    <section class="card" id="gate" hidden>
+      <h1 style="font-size:1.8rem">관리자 전용 미리보기</h1>
+      <p id="gateText">새 기능을 미리 확인하는 주소예요. 정식 게임은 아래에서 할 수 있어요.</p>
+      <a class="btnlink" href="../">정식 게임으로 가기</a>
+      <button class="ghost" type="button" id="gateRetry">관리자 확인 다시 하기</button>
     </section>
     <section class="card" id="welcome" hidden>
       <h1>어서 와요!</h1>

@@ -8,6 +8,7 @@
 --   세 테이블 모두 RLS 를 켜고 정책을 두지 않아서, 공개 키로는 직접 읽거나 쓸 수 없습니다.
 --
 -- 공개 키(anon)로 부를 수 있는 함수: get_status, start_run, heartbeat, get_leaderboard, set_nickname
+-- 관리자 키가 있어야 하는 함수: admin_set_maintenance, admin_list_scores, admin_hide_score, admin_delete_score, admin_reset_ranking
 -- 서버 전용(service_role) 함수: get_run_check, finalize_run
 --   → Edge Function "verify-run" 이 게임을 서버에서 다시 돌려 점수를 직접 계산한 뒤 finalize_run 으로 기록합니다.
 --
@@ -217,7 +218,67 @@ begin
   return v_nick;
 end $$;
 
+-- 관리자 메뉴용 함수: 모두 서버에서 관리자 키(owner_key)를 확인합니다.
+create or replace function public.is_owner(p_key text)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from app_config where id = 1 and owner_key <> '' and owner_key = p_key);
+$$;
+
+create or replace function public.admin_set_maintenance(p_key text, p_on boolean, p_message text)
+returns json language plpgsql security definer set search_path = public as $$
+begin
+  if not is_owner(p_key) then raise exception 'not owner'; end if;
+  update app_config
+  set maintenance = coalesce(p_on, maintenance),
+      message = coalesce(left(btrim(p_message), 200), message)
+  where id = 1;
+  return get_status(p_key);
+end $$;
+
+create or replace function public.admin_list_scores(p_key text)
+returns json language plpgsql stable security definer set search_path = public as $$
+begin
+  if not is_owner(p_key) then raise exception 'not owner'; end if;
+  return coalesce((
+    select json_agg(json_build_object(
+      'id', s.id, 'nickname', s.nickname, 'score', s.score, 'time', s.time_s, 'hidden', s.hidden,
+      'at', extract(epoch from s.created_at), 'player', left(md5(s.device), 6)
+    ) order by s.score desc, s.created_at)
+    from (select * from scores order by score desc, created_at limit 60) s
+  ), '[]'::json);
+end $$;
+
+create or replace function public.admin_hide_score(p_key text, p_id bigint, p_hidden boolean, p_whole_player boolean)
+returns void language plpgsql security definer set search_path = public as $$
+declare v_device text;
+begin
+  if not is_owner(p_key) then raise exception 'not owner'; end if;
+  select device into v_device from scores where id = p_id;
+  if p_whole_player then update scores set hidden = p_hidden where device = v_device;
+  else update scores set hidden = p_hidden where id = p_id; end if;
+end $$;
+
+create or replace function public.admin_delete_score(p_key text, p_id bigint)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if not is_owner(p_key) then raise exception 'not owner'; end if;
+  delete from scores where id = p_id;
+end $$;
+
+create or replace function public.admin_reset_ranking(p_key text)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if not is_owner(p_key) then raise exception 'not owner'; end if;
+  truncate table scores, beats, runs restart identity;
+end $$;
+
 revoke all on function public.clean_nickname(text) from public, anon, authenticated;
+revoke all on function public.is_owner(text) from public, anon, authenticated;
+revoke all on function public.admin_set_maintenance(text, boolean, text) from public, anon, authenticated;
+revoke all on function public.admin_list_scores(text) from public, anon, authenticated;
+revoke all on function public.admin_hide_score(text, bigint, boolean, boolean) from public, anon, authenticated;
+revoke all on function public.admin_delete_score(text, bigint) from public, anon, authenticated;
+revoke all on function public.admin_reset_ranking(text) from public, anon, authenticated;
 revoke all on function public.start_run(text, int) from public, anon, authenticated;
 revoke all on function public.start_run(text, int, text) from public, anon, authenticated;
 revoke all on function public.get_status(text) from public, anon, authenticated;
@@ -235,3 +296,8 @@ grant execute on function public.get_leaderboard(text) to anon, authenticated;
 grant execute on function public.set_nickname(text, text) to anon, authenticated;
 grant execute on function public.get_run_check(uuid) to service_role;
 grant execute on function public.finalize_run(uuid, text, text, text, jsonb, int, numeric, int, int) to service_role;
+grant execute on function public.admin_set_maintenance(text, boolean, text) to anon, authenticated;
+grant execute on function public.admin_list_scores(text) to anon, authenticated;
+grant execute on function public.admin_hide_score(text, bigint, boolean, boolean) to anon, authenticated;
+grant execute on function public.admin_delete_score(text, bigint) to anon, authenticated;
+grant execute on function public.admin_reset_ranking(text) to anon, authenticated;

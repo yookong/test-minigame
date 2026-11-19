@@ -33,7 +33,10 @@ Claude 링크(artifact)에서는 외부 서버 연결이 막혀 랭킹이 동작
 
 ## 작업 방식과 점검 모드
 
-- 수정은 `dev` 브랜치에서 하고, 확인이 끝나면 `main`에 합칩니다. GitHub Pages는 `main`만 배포합니다.
+- 수정은 `dev` 브랜치에서 하고, 확인이 끝나면 `main`에 합칩니다.
+- GitHub Actions(`.github/workflows/pages.yml`)가 `main`을 사이트 루트에, `dev`를 `/dev/`에 배포합니다.
+  `/dev/`는 관리자 키가 있는 기기에서만 열리고, 다른 사람에게는 "관리자 전용 미리보기" 화면만 보입니다.
+- 관리자 기기의 홈 화면 아래에 "관리자 메뉴"가 생깁니다: 버전 전환, 보상·화면 테스트, 테스트 판(무적·시작 레벨·속도, 랭킹 제외), 점검 모드 스위치, 랭킹 관리.
 - 점검 모드: SQL Editor에서 `update public.app_config set maintenance = true where id = 1;` (끄기는 `false`).
   점검 중에는 관리자 키가 있는 기기만 게임을 시작할 수 있습니다. 관리자 키는 `owner_key`에 저장하고,
   휴대폰에서 `https://yookong.github.io/test-minigame/#owner-<키>`로 한 번 접속하면 기억됩니다.
