@@ -9,7 +9,10 @@
 // The world is 400 units wide and `worldH` units tall and advances in fixed 1/60 s ticks.
 // Only + - * /, Math.floor/min/max/abs and Math.imul are used here, so every JS engine
 // (phone browsers and the server) produces bit-identical results for the same seed and inputs.
-function createSim(seed, worldH) {
+// `opts` is only for the owner's unranked test runs: { startLevel, invincible }. Ranked runs and the
+// server never pass it, so their results are unaffected.
+function createSim(seed, worldH, opts) {
+  opts = opts || {};
   const W = 400, H = worldH, DT = 1 / 60, MAX_STEP = 24;
   let s = seed >>> 0;
   const rng = () => {
@@ -36,6 +39,7 @@ function createSim(seed, worldH) {
     player: { x: W / 2, y: H - Math.max(80, H * 0.14), r: 14 },
   };
   const P = sim.player;
+  if (opts.startLevel > 1) { sim.tick = (opts.startLevel - 1) * 900 - 1; sim.level = opts.startLevel - 1; }
   let spawnT = 0.6, starT = rand(2.5, 4), nextId = 1;
 
   function pickRockType(t) {
@@ -149,7 +153,7 @@ function createSim(seed, worldH) {
     for (const p of sim.pickups) p.y += p.vy * DT;
     sim.pickups = sim.pickups.filter((p) => p.y - p.r < H + 40);
 
-    for (const m of sim.rocks) {
+    for (const m of opts.invincible ? [] : sim.rocks) {
       const dx = m.x - P.x, dy = m.y - P.y, rr = (m.r + P.r) * 0.78;
       if (dx * dx + dy * dy < rr * rr) {
         sim.dead = true;

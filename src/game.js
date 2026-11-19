@@ -5,6 +5,8 @@
   const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const C = { amber: '#ffc45c', coral: '#ff6a55', ink: '#f4efe4', deep: '#080f27', boss: '#ff3d5e' };
   const DT = 1 / 60;
+  const BUILD = '__BUILD__';
+  const isDev = /\/dev\//.test(location.pathname);
 
   // ================= catalog =================
   const TABS = [['skin', '색깔'], ['hat', '모자'], ['face', '표정'], ['trail', '꼬리'], ['bg', '배경']];
@@ -76,7 +78,8 @@
     best: 0, stars: 0, owned: [],
     equip: { skin: 'sun', hat: 'none', face: 'basic', trail: 'none', bg: 'night' },
     ach: [], title: '', stats: { runs: 0, totalStars: 0, dodged: 0, buys: 0 },
-    settings: { sfx: true, music: true },
+    settings: { sfx: true, music: true, vibe: true },
+    daily: { last: '', streak: 0 }, challenge: null, onboarded: false, ownerKey: '',
   });
   let save = fresh();
   try {
@@ -93,16 +96,27 @@
       : Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join(''));
   }
   save.nickname = save.nickname || '';
+  save.onboarded = save.onboarded || save.stats.runs > 0 || !!save.nickname;
+  if (/^#owner-[A-Za-z0-9]{8,64}$/.test(location.hash)) {
+    save.ownerKey = location.hash.slice(7);
+    try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { location.hash = ''; }
+  }
   const persist = () => { try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e) {} };
   persist();
+  const buzz = (ms) => { if (save.settings.vibe) try { navigator.vibrate && navigator.vibrate(ms); } catch (e) {} };
   const owns = (cat, id) => findItem(cat, id).price === 0 || save.owned.includes(cat + ':' + id);
 
   const scoreEl = $('score'), lvEl = $('lv'), walletEl = $('wallet'), bestEl = $('best');
   const overlay = $('overlay'), pauseBtn = $('pauseBtn');
-  const screens = { start: $('start'), over: $('over'), shop: $('shop'), ach: $('ach'), pause: $('pause'), rank: $('rank') };
+  const screens = {};
+  for (const id of ['home', 'welcome', 'attend', 'settings', 'help', 'install', 'maint', 'gate', 'admin', 'over', 'shop', 'ach', 'pause', 'rank']) screens[id] = $(id);
+  const hud = $('hud');
   function refreshHud() {
     walletEl.textContent = save.stars; bestEl.textContent = save.best;
     for (const el of document.querySelectorAll('[data-title]')) { el.hidden = !save.title; el.textContent = save.title; }
+    $('homeName').textContent = save.nickname || '이름 없는 별';
+    $('homeStars').textContent = save.stars;
+    $('homeBest').textContent = save.best;
   }
 
   // ================= sound =================
@@ -195,7 +209,7 @@
     for (const b of document.querySelectorAll('[data-setting]')) {
       const on = save.settings[b.dataset.setting];
       b.setAttribute('aria-pressed', String(on));
-      b.textContent = (b.dataset.setting === 'sfx' ? '효과음 ' : '배경음 ') + (on ? '켜짐' : '꺼짐');
+      b.textContent = { sfx: '효과음 ', music: '배경음 ', vibe: '진동 ' }[b.dataset.setting] + (on ? '켜짐' : '꺼짐');
     }
   }
   for (const b of document.querySelectorAll('[data-setting]')) {
@@ -203,6 +217,7 @@
       const k = b.dataset.setting;
       save.settings[k] = !save.settings[k];
       persist(); Sound.applySettings(); renderToggles();
+      if (k === 'vibe' && save.settings.vibe) buzz(40);
     });
   }
   document.addEventListener('click', (e) => {
@@ -622,6 +637,14 @@
   let banner = { text: '', t: 0, color: C.amber };
   let sparks = [], dots = [], trail = [];
   const showBanner = (text, color = C.amber, dur = 1.6) => { banner = { text, t: dur, color }; };
+  let shownLevel = '';
+  function renderLevel() {
+    const key = sim.level + (runTest ? 't' : '');
+    if (key === shownLevel) return;
+    shownLevel = key;
+    lvEl.textContent = 'Lv.' + sim.level;
+    if (runTest) { const t = document.createElement('span'); t.className = 'test'; t.textContent = ' · 테스트'; lvEl.appendChild(t); }
+  }
   const runInfo = () => ({ time: sim.t, score: sim.score, stars: runStars, boss: sim.storms });
   // same rounding the server uses for the leaderboard
   const secs = () => (Math.round(sim.tick / 6) / 10).toFixed(1);
@@ -645,33 +668,55 @@
     if (!screens.shop.hidden) sizePreview();
   }
 
-  async function start() {
+  let runTest = false;
+  const testOpts = { invincible: false, startLevel: 1, speed: 1 };
+  async function start(test) {
+    test = test === true;
     if (state === 'starting') return;
     Sound.init();
+    const prevState = state;
     state = 'starting';
     for (const b of [$('startBtn'), $('againBtn')]) { b.disabled = true; b.dataset.label = b.dataset.label || b.textContent; b.textContent = '준비 중…'; }
     worldH = fitWorldH(); updateView();
     net = null; pauseCount = 0;
     let seed = Math.floor(Math.random() * 2147483646) + 1;
+    if (test) {
+      for (const b of [$('startBtn'), $('againBtn')]) { b.disabled = false; b.textContent = b.dataset.label; }
+      begin(seed, { invincible: testOpts.invincible, startLevel: testOpts.startLevel });
+      return;
+    }
     try {
-      const r = await withTimeout(rpc('start_run', { p_device: save.device, p_h: worldH }), 3500);
+      const args = { p_device: save.device, p_h: worldH };
+      if (save.ownerKey) args.p_key = save.ownerKey;
+      const r = await withTimeout(rpc('start_run', args), 3500);
       net = { id: r.id, queue: Promise.resolve() };
       seed = Number(r.seed);
-    } catch (e) { net = null; }
+    } catch (e) {
+      net = null;
+      if (e.server && /maintenance/.test(e.message)) {
+        for (const b of [$('startBtn'), $('againBtn')]) { b.disabled = false; b.textContent = b.dataset.label; }
+        state = prevState;
+        checkStatus();
+        return;
+      }
+    }
     for (const b of [$('startBtn'), $('againBtn')]) { b.disabled = false; b.textContent = b.dataset.label; }
     begin(seed);
   }
 
-  function begin(seed) {
-    sim = createSim(seed, worldH);
+  function begin(seed, opts) {
+    runTest = !!opts;
+    sim = createSim(seed, worldH, opts);
     inputs = []; desiredX = sim.player.x; acc = 0;
     runStars = 0; runAch = []; achT = 0; banner.t = 0;
     sparks = []; trail = [];
     state = 'play';
-    overlay.hidden = true; pauseBtn.hidden = false;
-    scoreEl.textContent = '0'; lvEl.textContent = 'Lv.1';
+    overlay.hidden = true; pauseBtn.hidden = false; hud.hidden = false;
+    noteEl.classList.remove('mid');
+    scoreEl.textContent = '0'; renderLevel();
     Sound.music('normal');
-    if (!net) note('랭킹 서버에 연결하지 못해서 이번 판은 연습 판이에요');
+    if (runTest) note(`테스트 판 · 랭킹 제외${testOpts.invincible ? ' · 무적' : ''}${testOpts.speed !== 1 ? ` · ${testOpts.speed}배속` : ''}`);
+    else if (!net) note('랭킹 서버에 연결하지 못해서 이번 판은 연습 판이에요');
   }
 
   function pause() {
@@ -696,22 +741,24 @@
   function handle(events) {
     for (const e of events) {
       if (e.type === 'star') {
-        runStars++; save.stars++; save.stats.totalStars++;
+        runStars++;
+        if (!runTest) { save.stars++; save.stats.totalStars++; challengeAdd('stars', 1); }
         walletEl.textContent = save.stars;
         Sound.play('star');
         for (let i = 0; i < 12; i++) {
           const a = rand(0, Math.PI * 2), sp = rand(40, 160);
           sparks.push({ x: e.x, y: e.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 0.5, max: 0.5, c: C.ink });
         }
-        try { navigator.vibrate && navigator.vibrate(20); } catch (err) {}
+        buzz(20);
       } else if (e.type === 'dodge') {
-        save.stats.dodged += e.n;
+        if (!runTest) { save.stats.dodged += e.n; challengeAdd('dodged', e.n); }
       } else if (e.type === 'level') {
         showBanner(`Lv.${e.level} 속도 UP!`); Sound.play('level');
       } else if (e.type === 'bossWarn') {
         showBanner('운석 폭풍 경보!', C.boss, 2.2); Sound.play('warn'); Sound.music('boss');
       } else if (e.type === 'bossClear') {
-        runStars += 3; save.stars += 3; save.stats.totalStars += 3;
+        runStars += 3;
+        if (!runTest) { save.stars += 3; save.stats.totalStars += 3; }
         walletEl.textContent = save.stars;
         showBanner('폭풍 통과! +200 ★+3', C.amber, 2); Sound.play('clear'); Sound.music('normal');
       } else if (e.type === 'hit') {
@@ -730,41 +777,56 @@
       sparks.push({ x: p.x, y: p.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: rand(0.5, 1), max: 1,
         c: Math.random() < 0.6 ? col : C.coral });
     }
-    try { navigator.vibrate && navigator.vibrate(150); } catch (e) {}
+    buzz(150);
   }
 
   function finishRun(quit) {
     if (quit) beat(true);
     state = 'over'; pauseBtn.hidden = true;
     Sound.music('off');
-    save.stats.runs++;
-    checkAch(runInfo());
-    const score = sim.score, isNew = score > save.best;
+    if (!runTest) {
+      save.stats.runs++;
+      checkAch(runInfo());
+      challengeAdd('runs', 1);
+      challengeRun(runInfo());
+    }
+    const score = sim.score, isNew = !runTest && score > save.best;
     if (isNew) save.best = score;
     persist(); refreshHud();
     $('overHead').textContent = quit ? '여기까지 했어요' : '운석에 맞았어요';
     $('final').textContent = score;
     $('newbest').hidden = !isNew;
-    $('gain').textContent = runStars ? `별 ${runStars}개 획득 · 보유 ★${save.stars}` : `보유 ★${save.stars}`;
+    $('gain').textContent = runTest ? `테스트 판 · 별 ${runStars}개 (보유 별에는 안 들어가요)`
+      : runStars ? `별 ${runStars}개 획득 · 보유 ★${save.stars}` : `보유 ★${save.stars}`;
     $('overInfo').textContent = `버틴 시간 ${secs()}초 · Lv.${sim.level}${sim.storms ? ` · 폭풍 ${sim.storms}번 통과` : ''} · 최고 ${save.best}`;
     const na = $('newAch');
     na.hidden = !runAch.length;
     na.textContent = '';
     for (const a of runAch) { const d = document.createElement('div'); d.textContent = `새 업적 「${a.name}」 ★+${a.reward}`; na.appendChild(d); }
     show('over');
-    rankAfterRun({ net, inputs, score });
+    if (runTest) {
+      rankBox.hidden = false; nickForm.hidden = true;
+      rankMsg.className = 'msg err'; rankMsg.textContent = '테스트 판이라 랭킹에 올리지 않았어요.';
+    } else rankAfterRun({ net, inputs, score });
     net = null;
     if (nickForm.hidden) $('againBtn').focus({ preventScroll: true });
   }
 
-  let returnTo = 'start';
+  let returnTo = 'home';
   function show(name) {
     for (const k in screens) screens[k].hidden = k !== name;
     overlay.hidden = false;
+    overlay.dataset.screen = name;
+    noteEl.classList.toggle('mid', name === 'home');
+    hud.hidden = state === 'ready' || state === 'starting';
+    if (name === 'home') renderHome();
+    if (name === 'settings') { $('nickInput4').value = save.nickname; $('nickNote4').textContent = ''; resetArm = 0; renderReset(); }
+    if (name === 'attend') renderAttend();
+    if (name === 'admin') renderAdmin();
     if (name === 'shop') openShop();
     if (name === 'ach') renderAch();
     if (name === 'rank') loadRank();
-    if (name === 'start' || name === 'over') returnTo = name;
+    if (name === 'home' || name === 'over') returnTo = name;
   }
 
   // ================= input =================
@@ -794,11 +856,12 @@
     if (e.key === 'ArrowLeft' || e.key === 'a') keys.left = false;
     if (e.key === 'ArrowRight' || e.key === 'd') keys.right = false;
   });
-  $('startBtn').addEventListener('click', start);
-  $('againBtn').addEventListener('click', start);
+  $('startBtn').addEventListener('click', () => start(false));
+  $('againBtn').addEventListener('click', () => start(runTest));
   pauseBtn.addEventListener('click', pause);
   $('resumeBtn').addEventListener('click', resume);
   $('quitBtn').addEventListener('click', () => finishRun(true));
+  $('homeBtn').addEventListener('click', goHome);
   for (const b of document.querySelectorAll('[data-open]')) b.addEventListener('click', () => show(b.dataset.open));
   for (const b of document.querySelectorAll('[data-back]')) b.addEventListener('click', () => show(returnTo));
   document.addEventListener('visibilitychange', () => {
@@ -829,7 +892,7 @@
       if (keys.left) desiredX -= 420 * dt;
       if (keys.right) desiredX += 420 * dt;
       desiredX = clamp(desiredX, sim.player.r, 400 - sim.player.r);
-      acc += dt;
+      acc += dt * (runTest ? testOpts.speed : 1);
       while (acc >= DT && state === 'play') {
         acc -= DT;
         const input = Math.round(desiredX * 2);
@@ -838,11 +901,11 @@
         if (state === 'play' && sim.tick % 300 === 0) beat(false);
       }
       scoreEl.textContent = sim.score;
-      lvEl.textContent = 'Lv.' + sim.level;
+      renderLevel();
       trailT -= dt;
       if (trailT <= 0) { emitTrail(trail, save.equip.trail, sim.player.x, sim.player.y, sim.player.r, 1, clock); trailT = 1 / 40; }
       achT -= dt;
-      if (achT <= 0 && state === 'play') { checkAch(runInfo()); achT = 0.5; }
+      if (achT <= 0 && state === 'play' && !runTest) { checkAch(runInfo()); challengeRun(runInfo()); achT = 0.5; }
     }
     if (state === 'dying') {
       sim.coast(dt);
@@ -895,9 +958,9 @@
       ctx.beginPath(); ctx.arc(m.x + Math.cos(spin) * m.r * 0.35, m.y + Math.sin(spin) * m.r * 0.35, m.r * 0.28, 0, Math.PI * 2); ctx.fill();
     }
 
-    drawTrail(ctx, trail);
     const p = sim.player;
-    if (state !== 'dying' && state !== 'over') drawHero(ctx, p.x, p.y, p.r, save.equip, clock);
+    if (state !== 'ready' && state !== 'starting') drawTrail(ctx, trail);
+    if (state !== 'dying' && state !== 'over' && state !== 'ready' && state !== 'starting') drawHero(ctx, p.x, p.y, p.r, save.equip, clock);
 
     for (const s of sparks) {
       ctx.globalAlpha = clamp(s.life / s.max, 0, 1);
@@ -907,8 +970,10 @@
     ctx.globalAlpha = 1;
     ctx.restore();
 
+    if (state === 'ready' || state === 'starting') drawHomeScene();
+
     // wide screens: shade the area outside the play field
-    if (view.ox > 1) {
+    if (view.ox > 1 && state !== 'ready' && state !== 'starting') {
       ctx.fillStyle = 'rgba(4,8,20,0.55)';
       ctx.fillRect(0, 0, view.ox, H); ctx.fillRect(W - view.ox, 0, view.ox, H);
       ctx.strokeStyle = 'rgba(163,173,208,0.25)'; ctx.lineWidth = 1;
@@ -1030,7 +1095,7 @@
       save.stars -= it.price; save.owned.push(tab + ':' + id); save.stats.buys++;
       $('toast').textContent = `${it.name}을(를) 샀어요!`;
       Sound.play('buy');
-      try { navigator.vibrate && navigator.vibrate(30); } catch (e) {}
+      buzz(30);
       checkAch(idleRun());
     } else {
       $('toast').textContent = `${it.name} 장착!`;
@@ -1043,6 +1108,390 @@
     picked = null; pTrail = []; $('toast').textContent = '';
     renderShop();
     requestAnimationFrame(sizePreview);
+  }
+
+  // ================= home =================
+  // Decorative meteors and the player's character floating in the empty middle of the home screen.
+  let homeRocks = [], homeLast = 0;
+  const HOME_COLORS = ['#ff6a55', '#ff9a3c', '#ff5c8a', '#4fd8ff', '#9b7bff', '#7be06a'];
+  function drawHomeScene() {
+    const dt = Math.min(clock - homeLast, 0.05); homeLast = clock;
+    if (homeRocks.length < Math.max(6, W / 50) && Math.random() < dt * 2.2) {
+      const r = rand(6, 16);
+      homeRocks.push({ x: rand(0, W), y: -30, r, vy: rand(50, 110), vx: rand(-12, 12), c: HOME_COLORS[Math.floor(Math.random() * HOME_COLORS.length)] });
+    }
+    for (const m of homeRocks) {
+      if (!reduceMotion) { m.y += m.vy * dt; m.x += m.vx * dt; }
+      const len = m.r * 4;
+      const tail = ctx.createLinearGradient(m.x, m.y, m.x - m.vx * 0.3, m.y - len);
+      tail.addColorStop(0, rgba(m.c, 0.45)); tail.addColorStop(1, rgba(m.c, 0));
+      ctx.strokeStyle = tail; ctx.lineWidth = m.r * 1.4; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(m.x, m.y); ctx.lineTo(m.x - m.vx * 0.3, m.y - len); ctx.stroke();
+      ctx.globalAlpha = 0.85; ctx.fillStyle = m.c;
+      ctx.beginPath(); ctx.arc(m.x, m.y, m.r, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    homeRocks = homeRocks.filter((m) => m.y < H + 40);
+    if (screens.home.hidden || overlay.hidden) return;
+    const st = $('homeStage').getBoundingClientRect(), gr = cv.getBoundingClientRect();
+    if (st.height < 40) return;
+    const r = clamp(Math.min(st.height * 0.24, 44), 18, 44);
+    const x = st.left - gr.left + st.width / 2 + (reduceMotion ? 0 : Math.sin(clock * 0.9) * 26);
+    const y = st.top - gr.top + st.height * 0.55 + (reduceMotion ? 0 : Math.sin(clock * 1.8) * 8);
+    trailT -= dt;
+    if (trailT <= 0) { emitTrail(trail, save.equip.trail, x, y, r, 1.4, clock); trailT = 1 / 30; }
+    drawTrail(ctx, trail);
+    drawHero(ctx, x, y, r, save.equip, clock);
+  }
+
+  function goHome() {
+    state = 'ready'; pauseBtn.hidden = true; hud.hidden = true;
+    worldH = fitWorldH(); sim = createSim(1, worldH); updateView();
+    trail = []; sparks = [];
+    show('home');
+  }
+
+  async function refreshMyRank() {
+    try {
+      const data = await rpc('get_leaderboard', { p_device: save.device });
+      $('homeRankWrap').hidden = !data.me;
+      if (data.me) $('homeRank').textContent = data.me.rank + '위';
+    } catch (e) { /* offline: keep the home screen as is */ }
+  }
+
+  function renderHome() {
+    refreshHud();
+    $('devBadge').hidden = !isDev;
+    $('adminBtn').hidden = !isOwner;
+    renderChallenge();
+    renderInstall();
+    refreshMyRank();
+  }
+
+  // ================= dates =================
+  const dayKey = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const yesterdayKey = () => { const d = new Date(); d.setDate(d.getDate() - 1); return dayKey(d); };
+
+  // ================= daily challenge =================
+  const CHALLENGES = [
+    { id: 'stars3', text: '한 판에 별 3개 모으기', goal: 3, run: (r) => r.stars },
+    { id: 't30', text: '한 판에 30초 버티기', goal: 30, run: (r) => Math.floor(r.time) },
+    { id: 's500', text: '한 판에 500점 넘기기', goal: 500, run: (r) => r.score },
+    { id: 't45', text: '한 판에 45초 버티기', goal: 45, run: (r) => Math.floor(r.time) },
+    { id: 'dodge150', text: '오늘 운석 150개 피하기', goal: 150, sum: 'dodged' },
+    { id: 'runs3', text: '오늘 3판 플레이하기', goal: 3, sum: 'runs' },
+    { id: 'star8', text: '오늘 별 8개 모으기', goal: 8, sum: 'stars' },
+  ];
+  const CHALLENGE_REWARD = 5;
+  function todayChallenge() {
+    const key = dayKey();
+    if (!save.challenge || save.challenge.date !== key) {
+      let h = 0;
+      for (const ch of key) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+      save.challenge = { date: key, id: CHALLENGES[h % CHALLENGES.length].id, prog: 0, claimed: false, noted: false };
+      persist();
+    }
+    const def = CHALLENGES.find((c) => c.id === save.challenge.id) || CHALLENGES[0];
+    return { st: save.challenge, def };
+  }
+  function challengeProgress(value) {
+    const { st, def } = todayChallenge();
+    if (value <= st.prog) return;
+    st.prog = Math.min(value, def.goal);
+    if (st.prog >= def.goal && !st.noted) { st.noted = true; note(`오늘의 도전 달성! 홈에서 ★${CHALLENGE_REWARD} 받기`); Sound.play('ach'); }
+  }
+  function challengeAdd(kind, n) {
+    const { st, def } = todayChallenge();
+    if (def.sum === kind) challengeProgress(st.prog + n);
+  }
+  function challengeRun(run) {
+    const { def } = todayChallenge();
+    if (def.run) challengeProgress(def.run(run));
+  }
+  function renderChallenge() {
+    const { st, def } = todayChallenge(), done = st.prog >= def.goal;
+    $('dailyName').textContent = def.text;
+    $('dailyReward').textContent = CHALLENGE_REWARD;
+    $('dailyBar').style.width = `${Math.round(st.prog / def.goal * 100)}%`;
+    $('dailyBox').className = 'daily' + (st.claimed ? ' claimed' : done ? ' done' : '');
+    $('dailyClaim').hidden = !done || st.claimed;
+    $('dailyProg').hidden = done && !st.claimed;
+    $('dailyProg').textContent = st.claimed ? '받았어요' : `${st.prog} / ${def.goal}`;
+  }
+  $('dailyClaim').addEventListener('click', () => {
+    const { st, def } = todayChallenge();
+    if (st.prog < def.goal || st.claimed) return;
+    st.claimed = true; save.stars += CHALLENGE_REWARD;
+    persist(); Sound.play('buy'); buzz(30);
+    note(`오늘의 도전 보상 ★+${CHALLENGE_REWARD}`);
+    renderHome();
+  });
+
+  // ================= attendance =================
+  const ATTEND = [2, 2, 3, 3, 4, 4, 10];
+  const attendDue = () => save.daily.last !== dayKey();
+  const nextStreak = () => (save.daily.last === yesterdayKey() ? save.daily.streak % 7 + 1 : 1);
+  function renderAttend() {
+    const next = nextStreak(), grid = $('attendGrid');
+    $('attendText').textContent = next === 1 && save.daily.streak > 0 && save.daily.last !== yesterdayKey()
+      ? '하루를 쉬어서 1일차부터 다시 시작해요.' : `${next}일째 출석이에요! 7일을 채우면 큰 보상이 있어요.`;
+    grid.textContent = '';
+    ATTEND.forEach((reward, i) => {
+      const cell = document.createElement('div');
+      cell.className = 'attend-cell' + (i + 1 < next ? ' got' : '') + (i + 1 === next ? ' today' : '') + (i === 6 ? ' big' : '');
+      const d = document.createElement('span'); d.textContent = `${i + 1}일`; cell.appendChild(d);
+      const b = document.createElement('b'); b.textContent = `★${reward}`; cell.appendChild(b);
+      grid.appendChild(cell);
+    });
+    $('attendBtn').textContent = `★${ATTEND[next - 1]} 받기`;
+  }
+  $('attendBtn').addEventListener('click', () => {
+    if (!attendDue()) { show('home'); return; }
+    const next = nextStreak();
+    save.daily = { last: dayKey(), streak: next };
+    save.stars += ATTEND[next - 1];
+    persist(); Sound.play('buy'); buzz(30);
+    show('home');
+    note(`출석 ${next}일째 · ★+${ATTEND[next - 1]}`);
+  });
+
+  // ================= welcome =================
+  $('nickForm3').addEventListener('submit', (e) => { e.preventDefault(); $('nickInput3').blur(); });
+  $('welcomeBtn').addEventListener('click', () => {
+    const nick = cleanNick($('nickInput3').value);
+    if (nick) save.nickname = nick;
+    save.onboarded = true; persist();
+    afterHome();
+  });
+
+  // ================= settings =================
+  $('nickForm4').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const nick = cleanNick($('nickInput4').value), noteEl4 = $('nickNote4');
+    $('nickInput4').blur();
+    if (!nick) { noteEl4.textContent = '닉네임을 입력해 주세요.'; return; }
+    save.nickname = nick; persist(); refreshHud();
+    noteEl4.textContent = '저장했어요.';
+    try { await rpc('set_nickname', { p_device: save.device, p_nickname: nick }); noteEl4.textContent = '저장했어요. 랭킹에도 바뀐 이름으로 보여요.'; }
+    catch (err) { /* offline: the new name is used from the next ranked run */ }
+  });
+  let resetArm = 0, resetTimer = null;
+  function renderReset() {
+    $('resetBtn').textContent = resetArm ? '정말 지울까요? 한 번 더 누르면 지워져요' : '이 기기의 기록 초기화';
+  }
+  $('resetBtn').addEventListener('click', () => {
+    if (!resetArm) {
+      resetArm = 1; renderReset();
+      clearTimeout(resetTimer); resetTimer = setTimeout(() => { resetArm = 0; renderReset(); }, 4000);
+      return;
+    }
+    clearTimeout(resetTimer); resetArm = 0;
+    const keep = { device: save.device, nickname: save.nickname, settings: save.settings, ownerKey: save.ownerKey, onboarded: true };
+    save = { ...fresh(), ...keep };
+    persist(); refreshHud(); renderReset();
+    $('nickNote4').textContent = '';
+    note('이 기기의 기록을 지웠어요');
+  });
+
+  // ================= install (PWA, GitHub Pages only) =================
+  const onPages = location.protocol === 'https:' && location.hostname.endsWith('github.io') && !isDev;
+  const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  let installPrompt = null;
+  addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installPrompt = e; renderInstall(); });
+  addEventListener('appinstalled', () => { installPrompt = null; renderInstall(); note('앱으로 설치했어요!'); });
+  function renderInstall() {
+    const can = onPages && !standalone && (installPrompt || isIOS);
+    for (const el of document.querySelectorAll('[data-install]')) el.hidden = !can;
+    for (const el of document.querySelectorAll('[data-install-group]')) el.hidden = !can;
+  }
+  for (const b of document.querySelectorAll('[data-install]')) {
+    b.addEventListener('click', async () => {
+      if (installPrompt) {
+        installPrompt.prompt();
+        try { await installPrompt.userChoice; } catch (e) {}
+        installPrompt = null; renderInstall();
+      } else show('install');
+    });
+  }
+  if (onPages && 'serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+
+  // ================= maintenance =================
+  let maintenance = false, isOwner = false, lastStatus = null, statusKnown = false;
+  async function checkStatus() {
+    try {
+      const st = await withTimeout(rpc('get_status', { p_key: save.ownerKey || null }), 3500);
+      lastStatus = st;
+      isOwner = !!st.owner;
+      maintenance = !!st.maintenance && !st.owner;
+      $('adminBadge').hidden = !(st.maintenance && st.owner);
+      if (st.message) $('maintMsg').textContent = st.message;
+    } catch (e) {
+      lastStatus = null;
+      maintenance = false; // server unreachable or not set up: let people play (unranked)
+    }
+    statusKnown = true;
+    $('adminBtn').hidden = !isOwner;
+    const idle = state === 'ready' || state === 'over';
+    if (isDev && !isOwner) {
+      if (idle) { state = 'ready'; pauseBtn.hidden = true; show('gate'); }
+    } else if (maintenance) {
+      if (idle) { state = 'ready'; pauseBtn.hidden = true; show('maint'); }
+    } else if (!screens.maint.hidden || !screens.gate.hidden) { goHome(); afterHome(); }
+    return maintenance;
+  }
+  $('gateForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const key = $('gateKey').value.trim().replace(/^.*#owner-/, ''), gateNote = $('gateNote');
+    $('gateKey').blur();
+    if (!/^[A-Za-z0-9]{8,64}$/.test(key)) { gateNote.textContent = '키 형식이 맞지 않아요. 영문과 숫자만 입력해 주세요.'; return; }
+    gateNote.textContent = '확인하는 중…';
+    const prev = save.ownerKey;
+    save.ownerKey = key;
+    await checkStatus();
+    if (isOwner) { persist(); $('gateKey').value = ''; note('관리자로 등록했어요'); return; }
+    save.ownerKey = prev;
+    gateNote.textContent = statusKnown && lastStatus ? '키가 맞지 않아요. 다시 확인해 주세요.' : '서버에 연결하지 못했어요. 인터넷 연결을 확인해 주세요.';
+  });
+  $('maintRetry').addEventListener('click', async () => {
+    $('maintRetry').disabled = true; $('maintRetry').textContent = '확인 중…';
+    await checkStatus();
+    $('maintRetry').disabled = false; $('maintRetry').textContent = '다시 확인하기';
+  });
+
+  // ================= admin menu (owner key only) =================
+  let adminPane = 'version';
+  const adminRpc = (name, args = {}) => rpc(name, { p_key: save.ownerKey, ...args });
+  for (const b of $('adminTabs').children) b.addEventListener('click', () => { adminPane = b.dataset.pane; renderAdmin(); });
+  function renderAdmin() {
+    for (const b of $('adminTabs').children) b.setAttribute('aria-selected', String(b.dataset.pane === adminPane));
+    for (const el of document.querySelectorAll('.admin-pane')) el.hidden = el.dataset.pane !== adminPane;
+    $('adminChannel').textContent = isDev ? 'dev 버전' : '정식 버전';
+    if (adminPane === 'version') {
+      $('verText').textContent = isDev
+        ? '지금 dev 브랜치 버전을 보고 있어요. 아직 다른 사람들에게는 안 보이는 버전이에요.'
+        : '지금 정식 버전이에요. dev 버전에서 아직 배포 안 한 새 기능을 확인할 수 있어요.';
+      $('verLink').href = isDev ? '../' : './dev/';
+      $('verLink').textContent = isDev ? '정식 버전으로 가기' : 'dev 버전 열기';
+      $('verBuild').textContent = BUILD.startsWith('__') ? '' : `이 버전: ${BUILD}`;
+    }
+    if (adminPane === 'game') renderTest();
+    if (adminPane === 'maint') renderMaint();
+    if (adminPane === 'rank') loadAdminScores();
+  }
+
+  // rewards and screens (this device only)
+  const adminNote = (t) => { $('adminNote').textContent = t; };
+  for (const b of document.querySelectorAll('[data-act]')) {
+    b.addEventListener('click', () => {
+      const a = b.dataset.act;
+      if (a === 'stars10' || a === 'stars100') { save.stars += a === 'stars10' ? 10 : 100; adminNote(`별을 넣었어요. 보유 ★${save.stars}`); }
+      if (a === 'unlock') {
+        for (const cat in ITEMS) for (const it of ITEMS[cat]) if (it.price > 0 && !owns(cat, it.id)) save.owned.push(cat + ':' + it.id);
+        adminNote('상점 아이템을 모두 열었어요.');
+      }
+      if (a === 'attend') { save.daily.last = yesterdayKey(); persist(); show('attend'); return; }
+      if (a === 'welcome') { show('welcome'); return; }
+      if (a === 'chDone') { const { st, def } = todayChallenge(); st.prog = def.goal; st.claimed = false; adminNote(`오늘의 도전을 달성 상태로 바꿨어요: ${def.text}`); }
+      if (a === 'chReset') { save.challenge = null; todayChallenge(); adminNote('오늘의 도전 진행도를 0으로 돌렸어요.'); }
+      if (a === 'achReset') { save.ach = []; save.title = ''; adminNote('업적과 칭호를 초기화했어요.'); }
+      persist(); refreshHud();
+    });
+  }
+
+  // test runs
+  function renderTest() {
+    const inv = $('tInvincible');
+    inv.setAttribute('aria-pressed', String(testOpts.invincible));
+    inv.textContent = testOpts.invincible ? '무적 켜짐' : '무적 꺼짐';
+    for (const b of $('tLevel').children) b.setAttribute('aria-pressed', String(Number(b.dataset.v) === testOpts.startLevel));
+    for (const b of $('tSpeed').children) b.setAttribute('aria-pressed', String(Number(b.dataset.v) === testOpts.speed));
+  }
+  $('tInvincible').addEventListener('click', () => { testOpts.invincible = !testOpts.invincible; renderTest(); });
+  for (const b of $('tLevel').children) b.addEventListener('click', () => { testOpts.startLevel = Number(b.dataset.v); renderTest(); });
+  for (const b of $('tSpeed').children) b.addEventListener('click', () => { testOpts.speed = Number(b.dataset.v); renderTest(); });
+  $('testStart').addEventListener('click', () => start(true));
+
+  // maintenance switch
+  async function renderMaint(st) {
+    const el = $('maintState');
+    if (!st) { el.textContent = '확인 중…'; el.className = 'maint-state'; await checkStatus(); st = lastStatus; }
+    if (!st) { el.textContent = '서버에 연결하지 못했어요.'; return; }
+    el.textContent = st.maintenance ? '지금 점검 중이에요' : '지금 정상 운영 중이에요';
+    el.className = 'maint-state' + (st.maintenance ? ' on' : '');
+    if (!$('maintText').value) $('maintText').value = st.message || '';
+  }
+  async function setMaint(on) {
+    const el = $('maintState');
+    try {
+      const st = await adminRpc('admin_set_maintenance', { p_on: on, p_message: $('maintText').value.trim() || null });
+      lastStatus = st;
+      $('adminBadge').hidden = !st.maintenance;
+      renderMaint(st);
+      note(on ? '점검 모드를 켰어요' : '점검 모드를 껐어요');
+    } catch (e) { el.textContent = '바꾸지 못했어요: ' + (e.message || ''); }
+  }
+  $('maintForm').addEventListener('submit', (e) => { e.preventDefault(); $('maintText').blur(); });
+  $('maintOn').addEventListener('click', () => setMaint(true));
+  $('maintOff').addEventListener('click', () => setMaint(false));
+
+  // ranking management
+  const armed = new Map();
+  function twoStep(btn, label, confirmLabel, action) {
+    if (armed.get(btn)) { armed.delete(btn); action(); return; }
+    armed.set(btn, true); btn.textContent = confirmLabel;
+    setTimeout(() => { if (armed.get(btn)) { armed.delete(btn); btn.textContent = label; } }, 3500);
+  }
+  async function loadAdminScores() {
+    const box = $('adminScores');
+    box.textContent = '불러오는 중…';
+    try {
+      const rows = await adminRpc('admin_list_scores');
+      box.textContent = '';
+      if (!rows.length) { box.textContent = '기록이 없어요.'; return; }
+      for (const r of rows) {
+        const row = document.createElement('div'); row.className = 'arow' + (r.hidden ? ' hid' : '');
+        const top = document.createElement('div'); top.className = 'top';
+        const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = r.nickname + (r.hidden ? ' (숨김)' : '');
+        const sc = document.createElement('b'); sc.textContent = r.score;
+        top.append(nm, sc);
+        const meta = document.createElement('div'); meta.className = 'meta';
+        const d = new Date(r.at * 1000);
+        meta.textContent = `${Number(r.time).toFixed(1)}초 · ${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')} · 플레이어 ${r.player}`;
+        const acts = document.createElement('div'); acts.className = 'acts';
+        const act = (label, fn, danger, confirm) => {
+          const b = document.createElement('button'); b.type = 'button'; b.textContent = label;
+          if (danger) b.className = 'danger';
+          b.addEventListener('click', () => (confirm ? twoStep(b, label, confirm, fn) : fn()));
+          acts.appendChild(b);
+        };
+        const run = (p) => p.then(loadAdminScores).catch((e) => { meta.textContent = '실패: ' + (e.message || ''); });
+        act(r.hidden ? '보이기' : '숨기기', () => run(adminRpc('admin_hide_score', { p_id: r.id, p_hidden: !r.hidden, p_whole_player: false })));
+        act(r.hidden ? '이 사람 전부 보이기' : '이 사람 전부 숨기기', () => run(adminRpc('admin_hide_score', { p_id: r.id, p_hidden: !r.hidden, p_whole_player: true })));
+        act('삭제', () => run(adminRpc('admin_delete_score', { p_id: r.id })), true, '정말 삭제?');
+        row.append(top, meta, acts);
+        box.appendChild(row);
+      }
+    } catch (e) {
+      box.textContent = e.server ? '불러오지 못했어요: ' + e.message : '서버에 연결하지 못했어요.';
+    }
+  }
+  $('rankReset').addEventListener('click', () => {
+    const b = $('rankReset');
+    twoStep(b, '랭킹 전체 초기화', '정말 모든 랭킹 기록을 지울까요? 한 번 더 누르세요', async () => {
+      b.textContent = '랭킹 전체 초기화';
+      try { await adminRpc('admin_reset_ranking'); note('랭킹을 초기화했어요'); loadAdminScores(); }
+      catch (e) { $('adminScores').textContent = '초기화하지 못했어요: ' + (e.message || ''); }
+    });
+  });
+
+  // first screen after home: onboarding, then the daily attendance reward
+  function afterHome() {
+    if (isDev && !isOwner) { show('gate'); return; }
+    if (maintenance) { show('maint'); return; }
+    if (!save.onboarded) { show('welcome'); return; }
+    if (attendDue()) { show('attend'); return; }
+    show('home');
   }
 
   // ================= loop =================
@@ -1058,5 +1507,8 @@
 
   refreshHud(); renderToggles();
   resize();
+  show('home');
+  afterHome();
+  checkStatus();
   requestAnimationFrame(frame);
 })();
