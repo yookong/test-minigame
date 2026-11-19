@@ -1,0 +1,12 @@
+# Signals "Deploy Pages" (which runs from main) that the dev branch changed.
+name: Dev pushed
+
+on:
+  push:
+    branches: [dev]
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "dev updated at ${{ github.sha }}"

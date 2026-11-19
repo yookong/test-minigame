@@ -1,0 +1,56 @@
+# Publishes the site: the main branch at the root, the dev branch at /dev/ (owner-only preview).
+# Runs when main changes, and after "Dev pushed" finishes for a push to dev
+# (workflow_run runs in the main branch's context, so the github-pages environment allows it).
+name: Deploy Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_run:
+    workflows: [Dev pushed]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: main
+      - name: Check out dev
+        id: dev
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          ref: dev
+          path: dev
+      - name: Assemble site
+        run: |
+          mkdir -p _site/dev
+          cp main/index.html main/sw.js main/manifest.webmanifest main/icon-*.png _site/ 2>/dev/null || cp main/index.html _site/
+          if [ -f dev/index.html ]; then
+            cp dev/index.html _site/dev/
+            cp dev/manifest.webmanifest dev/icon-*.png _site/dev/ 2>/dev/null || true
+          fi
+          ls -R _site
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4
