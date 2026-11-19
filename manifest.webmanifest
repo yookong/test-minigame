@@ -1,0 +1,17 @@
+{
+  "name": "별똥별 피하기",
+  "short_name": "별똥별",
+  "description": "떨어지는 운석을 피하고 별을 모으는 미니게임",
+  "lang": "ko",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#080f27",
+  "theme_color": "#080f27",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

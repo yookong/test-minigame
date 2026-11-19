@@ -76,7 +76,8 @@
     best: 0, stars: 0, owned: [],
     equip: { skin: 'sun', hat: 'none', face: 'basic', trail: 'none', bg: 'night' },
     ach: [], title: '', stats: { runs: 0, totalStars: 0, dodged: 0, buys: 0 },
-    settings: { sfx: true, music: true },
+    settings: { sfx: true, music: true, vibe: true },
+    daily: { last: '', streak: 0 }, challenge: null, onboarded: false, ownerKey: '',
   });
   let save = fresh();
   try {
@@ -93,16 +94,27 @@
       : Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join(''));
   }
   save.nickname = save.nickname || '';
+  save.onboarded = save.onboarded || save.stats.runs > 0 || !!save.nickname;
+  if (/^#owner-[A-Za-z0-9]{8,64}$/.test(location.hash)) {
+    save.ownerKey = location.hash.slice(7);
+    try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { location.hash = ''; }
+  }
   const persist = () => { try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e) {} };
   persist();
+  const buzz = (ms) => { if (save.settings.vibe) try { navigator.vibrate && navigator.vibrate(ms); } catch (e) {} };
   const owns = (cat, id) => findItem(cat, id).price === 0 || save.owned.includes(cat + ':' + id);
 
   const scoreEl = $('score'), lvEl = $('lv'), walletEl = $('wallet'), bestEl = $('best');
   const overlay = $('overlay'), pauseBtn = $('pauseBtn');
-  const screens = { start: $('start'), over: $('over'), shop: $('shop'), ach: $('ach'), pause: $('pause'), rank: $('rank') };
+  const screens = {};
+  for (const id of ['home', 'welcome', 'attend', 'settings', 'help', 'install', 'maint', 'over', 'shop', 'ach', 'pause', 'rank']) screens[id] = $(id);
+  const hud = $('hud');
   function refreshHud() {
     walletEl.textContent = save.stars; bestEl.textContent = save.best;
     for (const el of document.querySelectorAll('[data-title]')) { el.hidden = !save.title; el.textContent = save.title; }
+    $('homeName').textContent = save.nickname || '이름 없는 별';
+    $('homeStars').textContent = save.stars;
+    $('homeBest').textContent = save.best;
   }
 
   // ================= sound =================
@@ -195,7 +207,7 @@
     for (const b of document.querySelectorAll('[data-setting]')) {
       const on = save.settings[b.dataset.setting];
       b.setAttribute('aria-pressed', String(on));
-      b.textContent = (b.dataset.setting === 'sfx' ? '효과음 ' : '배경음 ') + (on ? '켜짐' : '꺼짐');
+      b.textContent = { sfx: '효과음 ', music: '배경음 ', vibe: '진동 ' }[b.dataset.setting] + (on ? '켜짐' : '꺼짐');
     }
   }
   for (const b of document.querySelectorAll('[data-setting]')) {
@@ -203,6 +215,7 @@
       const k = b.dataset.setting;
       save.settings[k] = !save.settings[k];
       persist(); Sound.applySettings(); renderToggles();
+      if (k === 'vibe' && save.settings.vibe) buzz(40);
     });
   }
   document.addEventListener('click', (e) => {
@@ -648,16 +661,27 @@
   async function start() {
     if (state === 'starting') return;
     Sound.init();
+    const prevState = state;
     state = 'starting';
     for (const b of [$('startBtn'), $('againBtn')]) { b.disabled = true; b.dataset.label = b.dataset.label || b.textContent; b.textContent = '준비 중…'; }
     worldH = fitWorldH(); updateView();
     net = null; pauseCount = 0;
     let seed = Math.floor(Math.random() * 2147483646) + 1;
     try {
-      const r = await withTimeout(rpc('start_run', { p_device: save.device, p_h: worldH }), 3500);
+      const args = { p_device: save.device, p_h: worldH };
+      if (save.ownerKey) args.p_key = save.ownerKey;
+      const r = await withTimeout(rpc('start_run', args), 3500);
       net = { id: r.id, queue: Promise.resolve() };
       seed = Number(r.seed);
-    } catch (e) { net = null; }
+    } catch (e) {
+      net = null;
+      if (e.server && /maintenance/.test(e.message)) {
+        for (const b of [$('startBtn'), $('againBtn')]) { b.disabled = false; b.textContent = b.dataset.label; }
+        state = prevState;
+        checkStatus();
+        return;
+      }
+    }
     for (const b of [$('startBtn'), $('againBtn')]) { b.disabled = false; b.textContent = b.dataset.label; }
     begin(seed);
   }
@@ -668,7 +692,8 @@
     runStars = 0; runAch = []; achT = 0; banner.t = 0;
     sparks = []; trail = [];
     state = 'play';
-    overlay.hidden = true; pauseBtn.hidden = false;
+    overlay.hidden = true; pauseBtn.hidden = false; hud.hidden = false;
+    noteEl.classList.remove('mid');
     scoreEl.textContent = '0'; lvEl.textContent = 'Lv.1';
     Sound.music('normal');
     if (!net) note('랭킹 서버에 연결하지 못해서 이번 판은 연습 판이에요');
@@ -699,13 +724,15 @@
         runStars++; save.stars++; save.stats.totalStars++;
         walletEl.textContent = save.stars;
         Sound.play('star');
+        challengeAdd('stars', 1);
         for (let i = 0; i < 12; i++) {
           const a = rand(0, Math.PI * 2), sp = rand(40, 160);
           sparks.push({ x: e.x, y: e.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 0.5, max: 0.5, c: C.ink });
         }
-        try { navigator.vibrate && navigator.vibrate(20); } catch (err) {}
+        buzz(20);
       } else if (e.type === 'dodge') {
         save.stats.dodged += e.n;
+        challengeAdd('dodged', e.n);
       } else if (e.type === 'level') {
         showBanner(`Lv.${e.level} 속도 UP!`); Sound.play('level');
       } else if (e.type === 'bossWarn') {
@@ -730,7 +757,7 @@
       sparks.push({ x: p.x, y: p.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: rand(0.5, 1), max: 1,
         c: Math.random() < 0.6 ? col : C.coral });
     }
-    try { navigator.vibrate && navigator.vibrate(150); } catch (e) {}
+    buzz(150);
   }
 
   function finishRun(quit) {
@@ -739,6 +766,8 @@
     Sound.music('off');
     save.stats.runs++;
     checkAch(runInfo());
+    challengeAdd('runs', 1);
+    challengeRun(runInfo());
     const score = sim.score, isNew = score > save.best;
     if (isNew) save.best = score;
     persist(); refreshHud();
@@ -757,14 +786,20 @@
     if (nickForm.hidden) $('againBtn').focus({ preventScroll: true });
   }
 
-  let returnTo = 'start';
+  let returnTo = 'home';
   function show(name) {
     for (const k in screens) screens[k].hidden = k !== name;
     overlay.hidden = false;
+    overlay.dataset.screen = name;
+    noteEl.classList.toggle('mid', name === 'home');
+    hud.hidden = state === 'ready' || state === 'starting';
+    if (name === 'home') renderHome();
+    if (name === 'settings') { $('nickInput4').value = save.nickname; $('nickNote4').textContent = ''; resetArm = 0; renderReset(); }
+    if (name === 'attend') renderAttend();
     if (name === 'shop') openShop();
     if (name === 'ach') renderAch();
     if (name === 'rank') loadRank();
-    if (name === 'start' || name === 'over') returnTo = name;
+    if (name === 'home' || name === 'over') returnTo = name;
   }
 
   // ================= input =================
@@ -799,6 +834,7 @@
   pauseBtn.addEventListener('click', pause);
   $('resumeBtn').addEventListener('click', resume);
   $('quitBtn').addEventListener('click', () => finishRun(true));
+  $('homeBtn').addEventListener('click', goHome);
   for (const b of document.querySelectorAll('[data-open]')) b.addEventListener('click', () => show(b.dataset.open));
   for (const b of document.querySelectorAll('[data-back]')) b.addEventListener('click', () => show(returnTo));
   document.addEventListener('visibilitychange', () => {
@@ -842,7 +878,7 @@
       trailT -= dt;
       if (trailT <= 0) { emitTrail(trail, save.equip.trail, sim.player.x, sim.player.y, sim.player.r, 1, clock); trailT = 1 / 40; }
       achT -= dt;
-      if (achT <= 0 && state === 'play') { checkAch(runInfo()); achT = 0.5; }
+      if (achT <= 0 && state === 'play') { checkAch(runInfo()); challengeRun(runInfo()); achT = 0.5; }
     }
     if (state === 'dying') {
       sim.coast(dt);
@@ -895,9 +931,9 @@
       ctx.beginPath(); ctx.arc(m.x + Math.cos(spin) * m.r * 0.35, m.y + Math.sin(spin) * m.r * 0.35, m.r * 0.28, 0, Math.PI * 2); ctx.fill();
     }
 
-    drawTrail(ctx, trail);
     const p = sim.player;
-    if (state !== 'dying' && state !== 'over') drawHero(ctx, p.x, p.y, p.r, save.equip, clock);
+    if (state !== 'ready' && state !== 'starting') drawTrail(ctx, trail);
+    if (state !== 'dying' && state !== 'over' && state !== 'ready' && state !== 'starting') drawHero(ctx, p.x, p.y, p.r, save.equip, clock);
 
     for (const s of sparks) {
       ctx.globalAlpha = clamp(s.life / s.max, 0, 1);
@@ -907,8 +943,10 @@
     ctx.globalAlpha = 1;
     ctx.restore();
 
+    if (state === 'ready' || state === 'starting') drawHomeScene();
+
     // wide screens: shade the area outside the play field
-    if (view.ox > 1) {
+    if (view.ox > 1 && state !== 'ready' && state !== 'starting') {
       ctx.fillStyle = 'rgba(4,8,20,0.55)';
       ctx.fillRect(0, 0, view.ox, H); ctx.fillRect(W - view.ox, 0, view.ox, H);
       ctx.strokeStyle = 'rgba(163,173,208,0.25)'; ctx.lineWidth = 1;
@@ -1030,7 +1068,7 @@
       save.stars -= it.price; save.owned.push(tab + ':' + id); save.stats.buys++;
       $('toast').textContent = `${it.name}을(를) 샀어요!`;
       Sound.play('buy');
-      try { navigator.vibrate && navigator.vibrate(30); } catch (e) {}
+      buzz(30);
       checkAch(idleRun());
     } else {
       $('toast').textContent = `${it.name} 장착!`;
@@ -1043,6 +1081,240 @@
     picked = null; pTrail = []; $('toast').textContent = '';
     renderShop();
     requestAnimationFrame(sizePreview);
+  }
+
+  // ================= home =================
+  // Decorative meteors and the player's character floating in the empty middle of the home screen.
+  let homeRocks = [], homeLast = 0;
+  const HOME_COLORS = ['#ff6a55', '#ff9a3c', '#ff5c8a', '#4fd8ff', '#9b7bff', '#7be06a'];
+  function drawHomeScene() {
+    const dt = Math.min(clock - homeLast, 0.05); homeLast = clock;
+    if (homeRocks.length < Math.max(6, W / 50) && Math.random() < dt * 2.2) {
+      const r = rand(6, 16);
+      homeRocks.push({ x: rand(0, W), y: -30, r, vy: rand(50, 110), vx: rand(-12, 12), c: HOME_COLORS[Math.floor(Math.random() * HOME_COLORS.length)] });
+    }
+    for (const m of homeRocks) {
+      if (!reduceMotion) { m.y += m.vy * dt; m.x += m.vx * dt; }
+      const len = m.r * 4;
+      const tail = ctx.createLinearGradient(m.x, m.y, m.x - m.vx * 0.3, m.y - len);
+      tail.addColorStop(0, rgba(m.c, 0.45)); tail.addColorStop(1, rgba(m.c, 0));
+      ctx.strokeStyle = tail; ctx.lineWidth = m.r * 1.4; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(m.x, m.y); ctx.lineTo(m.x - m.vx * 0.3, m.y - len); ctx.stroke();
+      ctx.globalAlpha = 0.85; ctx.fillStyle = m.c;
+      ctx.beginPath(); ctx.arc(m.x, m.y, m.r, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    homeRocks = homeRocks.filter((m) => m.y < H + 40);
+    if (screens.home.hidden || overlay.hidden) return;
+    const st = $('homeStage').getBoundingClientRect(), gr = cv.getBoundingClientRect();
+    if (st.height < 40) return;
+    const r = clamp(Math.min(st.height * 0.24, 44), 18, 44);
+    const x = st.left - gr.left + st.width / 2 + (reduceMotion ? 0 : Math.sin(clock * 0.9) * 26);
+    const y = st.top - gr.top + st.height * 0.55 + (reduceMotion ? 0 : Math.sin(clock * 1.8) * 8);
+    trailT -= dt;
+    if (trailT <= 0) { emitTrail(trail, save.equip.trail, x, y, r, 1.4, clock); trailT = 1 / 30; }
+    drawTrail(ctx, trail);
+    drawHero(ctx, x, y, r, save.equip, clock);
+  }
+
+  function goHome() {
+    state = 'ready'; pauseBtn.hidden = true; hud.hidden = true;
+    worldH = fitWorldH(); sim = createSim(1, worldH); updateView();
+    trail = []; sparks = [];
+    show('home');
+  }
+
+  async function refreshMyRank() {
+    try {
+      const data = await rpc('get_leaderboard', { p_device: save.device });
+      $('homeRankWrap').hidden = !data.me;
+      if (data.me) $('homeRank').textContent = data.me.rank + '위';
+    } catch (e) { /* offline: keep the home screen as is */ }
+  }
+
+  function renderHome() {
+    refreshHud();
+    renderChallenge();
+    renderInstall();
+    refreshMyRank();
+  }
+
+  // ================= dates =================
+  const dayKey = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const yesterdayKey = () => { const d = new Date(); d.setDate(d.getDate() - 1); return dayKey(d); };
+
+  // ================= daily challenge =================
+  const CHALLENGES = [
+    { id: 'stars3', text: '한 판에 별 3개 모으기', goal: 3, run: (r) => r.stars },
+    { id: 't30', text: '한 판에 30초 버티기', goal: 30, run: (r) => Math.floor(r.time) },
+    { id: 's500', text: '한 판에 500점 넘기기', goal: 500, run: (r) => r.score },
+    { id: 't45', text: '한 판에 45초 버티기', goal: 45, run: (r) => Math.floor(r.time) },
+    { id: 'dodge150', text: '오늘 운석 150개 피하기', goal: 150, sum: 'dodged' },
+    { id: 'runs3', text: '오늘 3판 플레이하기', goal: 3, sum: 'runs' },
+    { id: 'star8', text: '오늘 별 8개 모으기', goal: 8, sum: 'stars' },
+  ];
+  const CHALLENGE_REWARD = 5;
+  function todayChallenge() {
+    const key = dayKey();
+    if (!save.challenge || save.challenge.date !== key) {
+      let h = 0;
+      for (const ch of key) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+      save.challenge = { date: key, id: CHALLENGES[h % CHALLENGES.length].id, prog: 0, claimed: false, noted: false };
+      persist();
+    }
+    const def = CHALLENGES.find((c) => c.id === save.challenge.id) || CHALLENGES[0];
+    return { st: save.challenge, def };
+  }
+  function challengeProgress(value) {
+    const { st, def } = todayChallenge();
+    if (value <= st.prog) return;
+    st.prog = Math.min(value, def.goal);
+    if (st.prog >= def.goal && !st.noted) { st.noted = true; note(`오늘의 도전 달성! 홈에서 ★${CHALLENGE_REWARD} 받기`); Sound.play('ach'); }
+  }
+  function challengeAdd(kind, n) {
+    const { st, def } = todayChallenge();
+    if (def.sum === kind) challengeProgress(st.prog + n);
+  }
+  function challengeRun(run) {
+    const { def } = todayChallenge();
+    if (def.run) challengeProgress(def.run(run));
+  }
+  function renderChallenge() {
+    const { st, def } = todayChallenge(), done = st.prog >= def.goal;
+    $('dailyName').textContent = def.text;
+    $('dailyReward').textContent = CHALLENGE_REWARD;
+    $('dailyBar').style.width = `${Math.round(st.prog / def.goal * 100)}%`;
+    $('dailyBox').className = 'daily' + (st.claimed ? ' claimed' : done ? ' done' : '');
+    $('dailyClaim').hidden = !done || st.claimed;
+    $('dailyProg').hidden = done && !st.claimed;
+    $('dailyProg').textContent = st.claimed ? '받았어요' : `${st.prog} / ${def.goal}`;
+  }
+  $('dailyClaim').addEventListener('click', () => {
+    const { st, def } = todayChallenge();
+    if (st.prog < def.goal || st.claimed) return;
+    st.claimed = true; save.stars += CHALLENGE_REWARD;
+    persist(); Sound.play('buy'); buzz(30);
+    note(`오늘의 도전 보상 ★+${CHALLENGE_REWARD}`);
+    renderHome();
+  });
+
+  // ================= attendance =================
+  const ATTEND = [2, 2, 3, 3, 4, 4, 10];
+  const attendDue = () => save.daily.last !== dayKey();
+  const nextStreak = () => (save.daily.last === yesterdayKey() ? save.daily.streak % 7 + 1 : 1);
+  function renderAttend() {
+    const next = nextStreak(), grid = $('attendGrid');
+    $('attendText').textContent = next === 1 && save.daily.streak > 0 && save.daily.last !== yesterdayKey()
+      ? '하루를 쉬어서 1일차부터 다시 시작해요.' : `${next}일째 출석이에요! 7일을 채우면 큰 보상이 있어요.`;
+    grid.textContent = '';
+    ATTEND.forEach((reward, i) => {
+      const cell = document.createElement('div');
+      cell.className = 'attend-cell' + (i + 1 < next ? ' got' : '') + (i + 1 === next ? ' today' : '') + (i === 6 ? ' big' : '');
+      const d = document.createElement('span'); d.textContent = `${i + 1}일`; cell.appendChild(d);
+      const b = document.createElement('b'); b.textContent = `★${reward}`; cell.appendChild(b);
+      grid.appendChild(cell);
+    });
+    $('attendBtn').textContent = `★${ATTEND[next - 1]} 받기`;
+  }
+  $('attendBtn').addEventListener('click', () => {
+    if (!attendDue()) { show('home'); return; }
+    const next = nextStreak();
+    save.daily = { last: dayKey(), streak: next };
+    save.stars += ATTEND[next - 1];
+    persist(); Sound.play('buy'); buzz(30);
+    show('home');
+    note(`출석 ${next}일째 · ★+${ATTEND[next - 1]}`);
+  });
+
+  // ================= welcome =================
+  $('nickForm3').addEventListener('submit', (e) => { e.preventDefault(); $('nickInput3').blur(); });
+  $('welcomeBtn').addEventListener('click', () => {
+    const nick = cleanNick($('nickInput3').value);
+    if (nick) save.nickname = nick;
+    save.onboarded = true; persist();
+    afterHome();
+  });
+
+  // ================= settings =================
+  $('nickForm4').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const nick = cleanNick($('nickInput4').value), noteEl4 = $('nickNote4');
+    $('nickInput4').blur();
+    if (!nick) { noteEl4.textContent = '닉네임을 입력해 주세요.'; return; }
+    save.nickname = nick; persist(); refreshHud();
+    noteEl4.textContent = '저장했어요.';
+    try { await rpc('set_nickname', { p_device: save.device, p_nickname: nick }); noteEl4.textContent = '저장했어요. 랭킹에도 바뀐 이름으로 보여요.'; }
+    catch (err) { /* offline: the new name is used from the next ranked run */ }
+  });
+  let resetArm = 0, resetTimer = null;
+  function renderReset() {
+    $('resetBtn').textContent = resetArm ? '정말 지울까요? 한 번 더 누르면 지워져요' : '이 기기의 기록 초기화';
+  }
+  $('resetBtn').addEventListener('click', () => {
+    if (!resetArm) {
+      resetArm = 1; renderReset();
+      clearTimeout(resetTimer); resetTimer = setTimeout(() => { resetArm = 0; renderReset(); }, 4000);
+      return;
+    }
+    clearTimeout(resetTimer); resetArm = 0;
+    const keep = { device: save.device, nickname: save.nickname, settings: save.settings, ownerKey: save.ownerKey, onboarded: true };
+    save = { ...fresh(), ...keep };
+    persist(); refreshHud(); renderReset();
+    $('nickNote4').textContent = '';
+    note('이 기기의 기록을 지웠어요');
+  });
+
+  // ================= install (PWA, GitHub Pages only) =================
+  const onPages = location.protocol === 'https:' && location.hostname.endsWith('github.io');
+  const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  let installPrompt = null;
+  addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installPrompt = e; renderInstall(); });
+  addEventListener('appinstalled', () => { installPrompt = null; renderInstall(); note('앱으로 설치했어요!'); });
+  function renderInstall() {
+    const can = onPages && !standalone && (installPrompt || isIOS);
+    for (const el of document.querySelectorAll('[data-install]')) el.hidden = !can;
+    for (const el of document.querySelectorAll('[data-install-group]')) el.hidden = !can;
+  }
+  for (const b of document.querySelectorAll('[data-install]')) {
+    b.addEventListener('click', async () => {
+      if (installPrompt) {
+        installPrompt.prompt();
+        try { await installPrompt.userChoice; } catch (e) {}
+        installPrompt = null; renderInstall();
+      } else show('install');
+    });
+  }
+  if (onPages && 'serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+
+  // ================= maintenance =================
+  let maintenance = false;
+  async function checkStatus() {
+    try {
+      const st = await withTimeout(rpc('get_status', { p_key: save.ownerKey || null }), 3500);
+      maintenance = !!st.maintenance && !st.owner;
+      $('adminBadge').hidden = !(st.maintenance && st.owner);
+      if (st.message) $('maintMsg').textContent = st.message;
+    } catch (e) {
+      maintenance = false; // server unreachable or not set up: let people play (unranked)
+    }
+    if (maintenance) {
+      if (state === 'ready' || state === 'over') { state = 'ready'; pauseBtn.hidden = true; show('maint'); }
+    } else if (!screens.maint.hidden) goHome();
+    return maintenance;
+  }
+  $('maintRetry').addEventListener('click', async () => {
+    $('maintRetry').disabled = true; $('maintRetry').textContent = '확인 중…';
+    await checkStatus();
+    $('maintRetry').disabled = false; $('maintRetry').textContent = '다시 확인하기';
+  });
+
+  // first screen after home: onboarding, then the daily attendance reward
+  function afterHome() {
+    if (maintenance) { show('maint'); return; }
+    if (!save.onboarded) { show('welcome'); return; }
+    if (attendDue()) { show('attend'); return; }
+    show('home');
   }
 
   // ================= loop =================
@@ -1058,5 +1330,8 @@
 
   refreshHud(); renderToggles();
   resize();
+  show('home');
+  afterHome();
+  checkStatus();
   requestAnimationFrame(frame);
 })();

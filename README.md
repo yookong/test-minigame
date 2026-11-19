@@ -25,6 +25,19 @@ Supabase에 점수를 모읍니다. 게임이 보내는 점수는 믿지 않고,
 관리: 이상한 기록은 Table Editor → `scores`에서 `hidden`을 체크하면 랭킹에서 빠집니다.
 Claude 링크(artifact)에서는 외부 서버 연결이 막혀 랭킹이 동작하지 않습니다.
 
+## 홈 화면과 앱 설치
+
+- 홈 화면: 내 정보(닉네임·칭호·별·최고 점수·순위), 오늘의 도전, 게임 시작, 상점·업적·랭킹·설정·게임 방법
+- 처음 온 사람에게는 환영 화면(닉네임, 조작법), 하루 한 번 출석 보상(7일 주기, 7일째 ★10)
+- 앱 설치(PWA): `manifest.webmanifest`, `sw.js`, `icon-*.png`. 아이콘은 `python3 tools/make_icons.py`로 다시 만들 수 있습니다.
+
+## 작업 방식과 점검 모드
+
+- 수정은 `dev` 브랜치에서 하고, 확인이 끝나면 `main`에 합칩니다. GitHub Pages는 `main`만 배포합니다.
+- 점검 모드: SQL Editor에서 `update public.app_config set maintenance = true where id = 1;` (끄기는 `false`).
+  점검 중에는 관리자 키가 있는 기기만 게임을 시작할 수 있습니다. 관리자 키는 `owner_key`에 저장하고,
+  휴대폰에서 `https://yookong.github.io/test-minigame/#owner-<키>`로 한 번 접속하면 기억됩니다.
+
 ## 개발
 
 `index.html`과 `supabase/functions/verify-run/index.ts`는 생성 파일입니다. `src/`를 고친 뒤 빌드하세요.

@@ -7,13 +7,17 @@
 --   scores : 검증을 통과한 기록
 --   세 테이블 모두 RLS 를 켜고 정책을 두지 않아서, 공개 키로는 직접 읽거나 쓸 수 없습니다.
 --
--- 공개 키(anon)로 부를 수 있는 함수: start_run, heartbeat, get_leaderboard, set_nickname
+-- 공개 키(anon)로 부를 수 있는 함수: get_status, start_run, heartbeat, get_leaderboard, set_nickname
 -- 서버 전용(service_role) 함수: get_run_check, finalize_run
 --   → Edge Function "verify-run" 이 게임을 서버에서 다시 돌려 점수를 직접 계산한 뒤 finalize_run 으로 기록합니다.
 --
 -- 관리
 --   이상한 기록 숨기기:  update public.scores set hidden = true where nickname = '닉네임';
 --   랭킹 초기화:        truncate table public.scores, public.runs, public.beats restart identity;
+--   점검 시작:          update public.app_config set maintenance = true, message = '새 기능을 준비하고 있어요. 잠시 후 다시 와주세요!' where id = 1;
+--   점검 끝:            update public.app_config set maintenance = false where id = 1;
+--   관리자 키 정하기:    update public.app_config set owner_key = '영문숫자 16자 이상' where id = 1;
+--                        그다음 휴대폰에서 https://yookong.github.io/test-minigame/#owner-<키> 로 한 번 접속하면 관리자로 기억됩니다.
 
 create table if not exists public.runs (
   id uuid primary key default gen_random_uuid(),
@@ -72,10 +76,37 @@ begin
   return v;
 end $$;
 
-create or replace function public.start_run(p_device text, p_h int)
+-- 점검 모드: maintenance 가 켜져 있으면 관리자 키(owner_key)를 가진 사람만 판을 시작할 수 있습니다.
+create table if not exists public.app_config (
+  id int primary key default 1 check (id = 1),
+  maintenance boolean not null default false,
+  message text not null default '',
+  owner_key text not null default ''
+);
+insert into public.app_config (id) values (1) on conflict (id) do nothing;
+alter table public.app_config enable row level security;
+revoke all on public.app_config from anon, authenticated;
+
+create or replace function public.get_status(p_key text default null)
+returns json language sql stable security definer set search_path = public as $$
+  select json_build_object(
+    'maintenance', c.maintenance,
+    'message', c.message,
+    'owner', c.owner_key <> '' and p_key is not distinct from c.owner_key
+  )
+  from app_config c where c.id = 1;
+$$;
+
+create or replace function public.start_run(p_device text, p_h int, p_key text)
 returns json language plpgsql security definer set search_path = public as $$
 declare v_id uuid; v_seed bigint;
 begin
+  if exists (
+    select 1 from app_config
+    where id = 1 and maintenance and (owner_key = '' or p_key is distinct from owner_key)
+  ) then
+    raise exception 'maintenance';
+  end if;
   if p_device is null or p_device !~ '^[A-Za-z0-9-]{16,64}$' then raise exception 'bad device'; end if;
   if p_h is null or p_h < 560 or p_h > 900 then raise exception 'bad size'; end if;
   if (select count(*) from runs where device = p_device and started_at > now() - interval '10 minutes') >= 40 then
@@ -86,6 +117,12 @@ begin
   insert into runs (device, seed, h) values (p_device, v_seed, p_h) returning id into v_id;
   return json_build_object('id', v_id, 'seed', v_seed);
 end $$;
+
+-- 관리자 키 없이 부르는 경우 (게임 이전 버전 포함)
+create or replace function public.start_run(p_device text, p_h int)
+returns json language sql security definer set search_path = public as $$
+  select public.start_run(p_device, p_h, null::text);
+$$;
 
 create or replace function public.heartbeat(p_run uuid, p_device text, p_tick int, p_paused boolean)
 returns void language plpgsql security definer set search_path = public as $$
@@ -182,6 +219,8 @@ end $$;
 
 revoke all on function public.clean_nickname(text) from public, anon, authenticated;
 revoke all on function public.start_run(text, int) from public, anon, authenticated;
+revoke all on function public.start_run(text, int, text) from public, anon, authenticated;
+revoke all on function public.get_status(text) from public, anon, authenticated;
 revoke all on function public.heartbeat(uuid, text, int, boolean) from public, anon, authenticated;
 revoke all on function public.get_run_check(uuid) from public, anon, authenticated;
 revoke all on function public.finalize_run(uuid, text, text, text, jsonb, int, numeric, int, int) from public, anon, authenticated;
@@ -189,6 +228,8 @@ revoke all on function public.get_leaderboard(text) from public, anon, authentic
 revoke all on function public.set_nickname(text, text) from public, anon, authenticated;
 
 grant execute on function public.start_run(text, int) to anon, authenticated;
+grant execute on function public.start_run(text, int, text) to anon, authenticated;
+grant execute on function public.get_status(text) to anon, authenticated;
 grant execute on function public.heartbeat(uuid, text, int, boolean) to anon, authenticated;
 grant execute on function public.get_leaderboard(text) to anon, authenticated;
 grant execute on function public.set_nickname(text, text) to anon, authenticated;

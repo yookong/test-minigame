@@ -55,6 +55,7 @@ body {
   font-family: var(--display); font-size: 1rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   pointer-events: none; z-index: 5;
 }
+.note.mid { bottom: auto; top: 42%; }
 .overlay {
   position: absolute; inset: 0; display: grid; place-items: center;
   padding-block: 16px;
@@ -169,12 +170,77 @@ button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
 .rk .sc small { display: block; font-family: var(--body); font-size: 0.72rem; color: var(--mute); }
 .rankstate { color: var(--mute); padding: 16px 0; font-size: 0.95rem; word-break: keep-all; }
 .myrank { font-family: var(--display); color: var(--amber); font-size: 1.05rem; }
+/* home */
+.overlay[data-screen="home"] { background: transparent; place-items: stretch center; padding-block: 0; }
+.home {
+  width: 100%; max-width: 440px; height: 100%;
+  display: grid; grid-template-rows: auto auto minmax(80px, 1fr) auto; gap: 10px;
+  padding-block: 14px 18px;
+}
+.home-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.me { display: grid; gap: 6px; justify-items: start; min-width: 0; }
+.me-name { font-family: var(--display); font-size: 1.25rem; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.me .titletag { justify-self: start; }
+.me-stats { display: flex; gap: 14px; text-align: right; font-variant-numeric: tabular-nums; }
+.me-stats div { display: grid; gap: 2px; }
+.me-stats span { font-size: 0.75rem; color: var(--mute); }
+.me-stats b { font-family: var(--display); font-weight: 400; font-size: 1.2rem; }
+.me-stats .gold { color: var(--amber); }
+.logo { text-align: center; display: grid; justify-items: center; gap: 8px; padding-top: 4vh; }
+.logo h1 {
+  margin: 0; font-family: var(--display); font-weight: 400; color: var(--amber);
+  font-size: clamp(2.8rem, 13vw, 3.8rem); line-height: 0.98; letter-spacing: 1px;
+  text-shadow: 0 0 24px rgba(255, 196, 92, 0.35);
+}
+.admin-badge { font-size: 0.8rem; color: var(--coral); border: 1px solid var(--coral); border-radius: 999px; padding: 3px 10px; }
+.home-bottom { display: grid; gap: 12px; }
+.daily {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 12px;
+  padding: 12px 14px; border-radius: 16px; background: var(--panel); border: 1px solid var(--line); text-align: left;
+}
+.daily-label { font-size: 0.78rem; color: var(--amber); }
+.daily-name { font-family: var(--display); font-size: 1.05rem; margin-top: 2px; }
+.daily-prog { font-size: 0.85rem; color: var(--mute); font-variant-numeric: tabular-nums; grid-column: 2; grid-row: 1; }
+.daily .bar { height: 6px; border-radius: 3px; background: var(--tile); margin-top: 8px; overflow: hidden; }
+.daily .bar i { display: block; height: 100%; width: 0; background: var(--amber); border-radius: 3px; }
+.daily.done { border-color: var(--amber); }
+.daily.claimed { opacity: 0.6; }
+button.small { font-size: 1rem; padding: 9px 16px; grid-column: 2; grid-row: 1; }
+button.play { font-size: 1.6rem; padding-block: 16px; box-shadow: 0 0 28px rgba(255, 196, 92, 0.3); }
+.menu { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+.menu button { font-size: 0.95rem; padding: 11px 2px; background: var(--panel); }
+.install-link {
+  justify-self: center; background: transparent; color: var(--mute); padding: 4px 8px;
+  font-family: var(--body); font-size: 0.88rem; text-decoration: underline; text-underline-offset: 3px;
+}
+
+/* welcome, attendance, settings, help */
+.steps { margin: 0; padding-left: 1.3em; text-align: left; color: var(--mute); line-height: 1.75; font-size: 0.93rem; word-break: keep-all; }
+.steps b { color: var(--ink); font-weight: 600; }
+#nickForm3 { grid-template-columns: minmax(0, 1fr); }
+.attend-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.attend-cell { display: grid; gap: 2px; padding: 8px 0; border-radius: 10px; background: var(--tile); border: 2px solid transparent; }
+.attend-cell span { font-size: 0.7rem; color: var(--mute); }
+.attend-cell b { font-family: var(--display); font-weight: 400; font-size: 0.95rem; color: var(--amber); }
+.attend-cell.got { opacity: 0.4; }
+.attend-cell.today { border-color: var(--amber); }
+.attend-cell.big b { font-size: 1.05rem; }
+.set-group { display: grid; gap: 8px; text-align: left; }
+.set-label { font-family: var(--display); color: var(--mute); font-size: 0.98rem; }
+.set-note { font-size: 0.8rem; color: var(--mute); line-height: 1.5; word-break: keep-all; min-height: 0; }
+button.danger { color: var(--coral); border-color: rgba(255, 106, 85, 0.5); }
+.help { display: grid; gap: 6px; text-align: left; }
+.help h3 { margin: 8px 0 0; font-family: var(--display); font-weight: 400; color: var(--amber); font-size: 1.1rem; }
+.legend-list { display: grid; gap: 6px; }
+.legend-list div { display: flex; align-items: center; gap: 8px; font-size: 0.88rem; color: var(--mute); }
+.legend-list b { color: var(--ink); font-weight: 600; }
+@media (max-height: 640px) { .logo { padding-top: 0; } .logo h1 { font-size: 2.6rem; } .daily { padding-block: 9px; } }
 @media (prefers-reduced-motion: reduce) { button:active:not(:disabled) { transform: none; } }
 </style>
 <!-- BODY -->
 <div id="game">
   <canvas id="cv" aria-label="게임 화면"></canvas>
-  <div class="hud" aria-live="off">
+  <div class="hud" id="hud" aria-live="off" hidden>
     <div>
       <div class="score" id="score">0</div>
       <div class="lv" id="lv">Lv.1</div>
@@ -187,29 +253,128 @@ button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
   </div>
   <div class="note" id="note" role="status" hidden></div>
   <div class="overlay" id="overlay">
-    <section class="card" id="start">
-      <h1>별똥별 피하기</h1>
-      <div class="titletag" data-title hidden></div>
-      <p>화면 아무 곳이나 손가락으로 좌우로 끌어서 떨어지는 운석을 피하세요. 15초마다 레벨이 오르고, 5레벨마다 운석 폭풍이 몰려와요.</p>
-      <div class="legend">
-        <span><i class="dot" style="background:#ff6a55"></i>보통</span>
-        <span><i class="dot" style="background:#4fd8ff"></i>작고 빠름</span>
-        <span><i class="dot" style="background:#9b7bff"></i>크고 느림</span>
-        <span><i class="dot" style="background:#7be06a"></i>지그재그</span>
+    <section class="home" id="home">
+      <div class="home-top">
+        <div class="me">
+          <div class="me-name" id="homeName">이름 없음</div>
+          <div class="titletag" data-title hidden></div>
+        </div>
+        <div class="me-stats">
+          <div><span>보유</span><b class="gold">★ <span id="homeStars">0</span></b></div>
+          <div><span>최고</span><b id="homeBest">0</b></div>
+          <div id="homeRankWrap" hidden><span>순위</span><b id="homeRank">-</b></div>
+        </div>
       </div>
-      <div class="btns">
-        <button id="startBtn" type="button">시작하기</button>
-        <div class="row3">
+      <div class="logo">
+        <h1>별똥별<br>피하기</h1>
+        <div class="admin-badge" id="adminBadge" hidden>점검 모드 · 관리자로 플레이 중</div>
+      </div>
+      <div class="home-stage" id="homeStage"></div>
+      <div class="home-bottom">
+        <div class="daily" id="dailyBox">
+          <div class="daily-text">
+            <div class="daily-label">오늘의 도전 · ★ <span id="dailyReward">5</span></div>
+            <div class="daily-name" id="dailyName"></div>
+            <div class="bar"><i id="dailyBar"></i></div>
+          </div>
+          <button type="button" id="dailyClaim" class="small" hidden>받기</button>
+          <div class="daily-prog" id="dailyProg"></div>
+        </div>
+        <button id="startBtn" class="play" type="button">게임 시작</button>
+        <nav class="menu" aria-label="메뉴">
           <button class="ghost" type="button" data-open="shop">상점</button>
           <button class="ghost" type="button" data-open="ach">업적</button>
           <button class="ghost" type="button" data-open="rank">랭킹</button>
-        </div>
-        <div class="row2">
+          <button class="ghost" type="button" data-open="settings">설정</button>
+          <button class="ghost" type="button" data-open="help">게임 방법</button>
+        </nav>
+        <button class="install-link" type="button" data-install hidden>앱으로 설치하기</button>
+      </div>
+    </section>
+    <section class="card" id="welcome" hidden>
+      <h1>어서 와요!</h1>
+      <p>떨어지는 운석을 피해서 오래 버티는 게임이에요.</p>
+      <ul class="steps">
+        <li><b>화면 아무 곳이나</b> 손가락으로 좌우로 끌면 움직여요</li>
+        <li><b>하얀 별</b>을 먹으면 점수와 별을 받아요</li>
+        <li>모은 별로 <b>상점</b>에서 캐릭터를 꾸며요</li>
+      </ul>
+      <form class="nickrow" id="nickForm3">
+        <input id="nickInput3" type="text" maxlength="12" placeholder="랭킹에 쓸 닉네임 (나중에 정해도 돼요)" autocomplete="nickname" enterkeyhint="done" aria-label="닉네임">
+      </form>
+      <button id="welcomeBtn" type="button">시작하기</button>
+    </section>
+    <section class="card" id="attend" hidden>
+      <h2 style="color:var(--amber);font-size:1.7rem">출석 보상</h2>
+      <p id="attendText"></p>
+      <div class="attend-grid" id="attendGrid"></div>
+      <button id="attendBtn" type="button">받기</button>
+    </section>
+    <section class="card" id="settings" hidden>
+      <div class="card-head"><h2>설정</h2></div>
+      <div class="set-group">
+        <div class="set-label">소리와 진동</div>
+        <div class="row3">
           <button class="toggle" type="button" data-setting="sfx">효과음</button>
           <button class="toggle" type="button" data-setting="music">배경음</button>
+          <button class="toggle" type="button" data-setting="vibe">진동</button>
         </div>
       </div>
-      <p style="font-size:.8rem">PC에서는 ← → 키로 움직이고 P 키로 멈춰요.</p>
+      <div class="set-group">
+        <div class="set-label">닉네임</div>
+        <form class="nickrow" id="nickForm4">
+          <input id="nickInput4" type="text" maxlength="12" placeholder="닉네임 (12자까지)" autocomplete="nickname" enterkeyhint="done" aria-label="닉네임">
+          <button type="submit">저장</button>
+        </form>
+        <div class="set-note" id="nickNote4"></div>
+      </div>
+      <div class="set-group" data-install-group hidden>
+        <div class="set-label">앱</div>
+        <button class="ghost" type="button" data-install>앱으로 설치하기</button>
+      </div>
+      <div class="set-group">
+        <div class="set-label">내 기록</div>
+        <button class="ghost danger" type="button" id="resetBtn">이 기기의 기록 초기화</button>
+        <div class="set-note">최고 점수, 별, 산 아이템, 업적이 지워져요. 랭킹에 올라간 기록은 그대로예요.</div>
+      </div>
+      <button class="ghost" type="button" data-back>닫기</button>
+    </section>
+    <section class="card" id="help" hidden>
+      <div class="card-head"><h2>게임 방법</h2></div>
+      <div class="help">
+        <h3>조작</h3>
+        <p>화면 아무 곳이나 손가락을 대고 좌우로 끌면 캐릭터가 움직여요. PC에서는 ← → 키, 일시정지는 P 키예요.</p>
+        <h3>운석</h3>
+        <div class="legend-list">
+          <div><i class="dot" style="background:#ff6a55"></i><b>보통</b> 빨강·주황·분홍. 처음부터</div>
+          <div><i class="dot" style="background:#4fd8ff"></i><b>작고 빠름</b> 8초부터</div>
+          <div><i class="dot" style="background:#9b7bff"></i><b>크고 느림</b> 15초부터</div>
+          <div><i class="dot" style="background:#7be06a"></i><b>지그재그</b> 좌우로 흔들려요. 30초부터</div>
+        </div>
+        <h3>레벨과 운석 폭풍</h3>
+        <p>15초마다 레벨이 올라 빨라져요. 5레벨마다 운석 폭풍 경보가 울리고, 빈틈이 있는 운석 줄이 쏟아져요. 빈틈으로 빠져나가면 +200점과 별 3개!</p>
+        <h3>점수</h3>
+        <p>버틴 1초마다 10점, 별 하나에 50점, 폭풍 통과 200점이에요.</p>
+        <h3>랭킹</h3>
+        <p>판이 끝나면 서버가 그 판을 다시 확인한 뒤 랭킹에 올려요. 일시정지는 한 판에 8번까지 괜찮아요.</p>
+      </div>
+      <button class="ghost" type="button" data-back>닫기</button>
+    </section>
+    <section class="card" id="install" hidden>
+      <div class="card-head"><h2>앱으로 설치하기</h2></div>
+      <p>아이폰은 Safari에서 이렇게 설치해요.</p>
+      <ol class="steps">
+        <li>아래쪽 <b>공유 버튼</b>(네모에서 화살표가 나오는 모양)을 눌러요</li>
+        <li><b>홈 화면에 추가</b>를 눌러요</li>
+        <li>오른쪽 위 <b>추가</b>를 누르면 홈 화면에 아이콘이 생겨요</li>
+      </ol>
+      <p>설치하면 주소창 없이 전체 화면으로 열려요.</p>
+      <button class="ghost" type="button" data-back>닫기</button>
+    </section>
+    <section class="card" id="maint" hidden>
+      <h1 style="font-size:2rem">점검 중이에요</h1>
+      <p id="maintMsg">더 재밌게 만들고 있어요. 잠시 후 다시 와주세요!</p>
+      <button id="maintRetry" type="button">다시 확인하기</button>
     </section>
     <section class="card" id="over" hidden>
       <h2 id="overHead">운석에 맞았어요</h2>
@@ -227,10 +392,9 @@ button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
       </div>
       <div class="btns">
         <button id="againBtn" type="button">다시 하기</button>
-        <div class="row3">
-          <button class="ghost" type="button" data-open="shop">상점</button>
-          <button class="ghost" type="button" data-open="ach">업적</button>
+        <div class="row2">
           <button class="ghost" type="button" data-open="rank">랭킹</button>
+          <button class="ghost" type="button" id="homeBtn">홈으로</button>
         </div>
       </div>
     </section>
@@ -257,7 +421,7 @@ button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
           <button class="toggle" type="button" data-setting="sfx">효과음</button>
           <button class="toggle" type="button" data-setting="music">배경음</button>
         </div>
-        <button id="quitBtn" class="ghost" type="button">그만하고 기록 보기</button>
+        <button id="quitBtn" class="ghost" type="button">그만하기</button>
       </div>
     </section>
     <section class="card" id="shop" hidden>
